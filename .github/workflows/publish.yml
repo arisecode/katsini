@@ -30,8 +30,8 @@ jobs:
         uses: elgohr/Publish-Docker-Github-Action@v5
         with:
           name: nightcodezero/katsini
-          registry: docker.pkg.github.com
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
           dockerfile: Dockerfile
           tags: ${{ inputs.tag }}
+          platforms: linux/amd64,linux/arm64
