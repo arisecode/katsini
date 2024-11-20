@@ -1,0 +1,37 @@
+name: Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish"
+        type: string
+        default: "latest"
+        required: true
+  workflow_call:
+    inputs:
+      tag:
+        description: "Tag to publish"
+        type: string
+        default: "latest"
+        required: true
+
+jobs:
+  build-and-publish:
+    name: Build and publish
+    runs-on: self-hosted
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Publish to Github packages registry
+        uses: elgohr/Publish-Docker-Github-Action@v5
+        with:
+          name: nightcodezero/katsini
+          registry: docker.pkg.github.com
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          dockerfile: Dockerfile
+          tags: ${{ inputs.tag }}
