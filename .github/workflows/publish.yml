@@ -32,6 +32,7 @@ jobs:
           name: nightcodezero/katsini
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+          registry: ghcr.io
           dockerfile: Dockerfile
           tags: ${{ inputs.tag }}
           platforms: linux/amd64,linux/arm64
