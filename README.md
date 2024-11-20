@@ -10,6 +10,7 @@
 ![CI](https://github.com/nightcodezero/katsini/actions/workflows/build-and-test.yml/badge.svg)
 ![CI](https://github.com/nightcodezero/katsini/actions/workflows/release.yml/badge.svg)
 [![Release](https://img.shields.io/github/release/nightcodezero/katsini.svg?style=flat-square)](https://github.com/nightcodezero/katsini/releases)
+[![codecov](https://codecov.io/gh/nightcodezero/katsini/graph/badge.svg?token=lk4yMGVBOK)](https://codecov.io/gh/nightcodezero/katsini)
 [![GitHub issues](https://img.shields.io/github/issues/nightcodezero/katsini)](https://github.com/nightcodezero/katsini/issues)
 ![GitHub pull requests](https://img.shields.io/github/issues-pr/nightcodezero/katsini?color=blue&style=flat-square)
 
