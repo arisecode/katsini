@@ -35,4 +35,3 @@ jobs:
           registry: ghcr.io
           dockerfile: Dockerfile
           tags: ${{ inputs.tag }}
-          platforms: linux/amd64,linux/arm64
