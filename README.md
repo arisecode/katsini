@@ -13,12 +13,7 @@
 [![GitHub issues](https://img.shields.io/github/issues/nightcodezero/katsini)](https://github.com/nightcodezero/katsini/issues)
 ![GitHub pull requests](https://img.shields.io/github/issues-pr/nightcodezero/katsini?color=blue&style=flat-square)
 
-## 🛍️ Supported Marketplaces
-- ✅ [Google Play Store](https://play.google.com/store)
-- ✅ [Apple App Store](https://apps.apple.com)
-- ✅ [Huawei AppGallery](https://appgallery.huawei.com)
-
-## ✨ Features
+## 🍕 Features
 - ⚡️ **Blazingly fast** — Lightning-quick app data retrieval powered by Go
 - 🛍️ **Multi-store support** — Fetch data from major app stores in one place
 - 🪶 **Lightweight** — Minimal resource footprint for efficient operation
@@ -26,6 +21,11 @@
 - 🔌 **Simple API** — Clean REST endpoints for seamless integration
 - 📝 **Structured data** — Consistent JSON output for all app stores
 - 🛠️ **Easy setup** — Get started in minutes with straightforward configuration
+
+## 🛍️ Supported App Stores
+- ✅ [Google Play Store](https://play.google.com/store)
+- ✅ [Apple App Store](https://apps.apple.com)
+- ✅ [Huawei AppGallery](https://appgallery.huawei.com)
 
 ## 🐳 Quick Start
 - **[Docker](https://docs.docker.com/engine/install/)** and **[Docker Compose](https://docs.docker.com/compose/install/)** must be installed on your machine.
