@@ -3,7 +3,7 @@ module github.com/nightcodezero/katsini
 go 1.23.1
 
 require (
-	github.com/chromedp/cdproto v0.0.0-20241222144035-c16d098c0fb6
+	github.com/chromedp/cdproto v0.0.0-20250120090109-d38428e4d9c8
 	github.com/chromedp/chromedp v0.11.2
 	github.com/stretchr/testify v1.10.0
 	github.com/testcontainers/testcontainers-go v0.35.0
@@ -100,7 +100,7 @@ require (
 	github.com/klauspost/compress v1.17.4 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/magiconair/properties v1.8.7 // indirect
-	github.com/mailru/easyjson v0.7.7 // indirect
+	github.com/mailru/easyjson v0.9.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.15 // indirect
