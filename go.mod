@@ -3,7 +3,7 @@ module github.com/nightcodezero/katsini
 go 1.24.0
 
 require (
-	github.com/chromedp/cdproto v0.0.0-20250222051814-50c6cb17f10a
+	github.com/chromedp/cdproto v0.0.0-20250224005500-01948a15fe7c
 	github.com/chromedp/chromedp v0.13.0
 	github.com/stretchr/testify v1.10.0
 	github.com/testcontainers/testcontainers-go v0.35.0
