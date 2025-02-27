@@ -37,6 +37,6 @@ jobs:
           context: .
           push: true
           tags: |
-            ghcr.io/nightcodezero/katsini:latest
-            ghcr.io/nightcodezero/katsini:${{ inputs.tag }}
-            ghcr.io/nightcodezero/katsini:${{ github.sha }}
+            ghcr.io/arisecode/katsini:latest
+            ghcr.io/arisecode/katsini:${{ inputs.tag }}
+            ghcr.io/arisecode/katsini:${{ github.sha }}

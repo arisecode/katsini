@@ -7,11 +7,11 @@
 <p>A blazing-fast, lightweight, and user-friendly tool built with <a href="https://golang.org">Go</a> for retrieving app information from major app stores.</p>
 
 [![made-with-Go](https://img.shields.io/badge/Made%20with-Go-blue)](https://go.dev/)
-![CI](https://github.com/nightcodezero/katsini/actions/workflows/build-and-test.yml/badge.svg)
-[![Release](https://img.shields.io/github/release/nightcodezero/katsini.svg?style=flat-square)](https://github.com/nightcodezero/katsini/releases)
-[![codecov](https://codecov.io/gh/nightcodezero/katsini/branch/master/graph/badge.svg?token=lk4yMGVBOK)](https://codecov.io/gh/nightcodezero/katsini)
-[![GitHub issues](https://img.shields.io/github/issues/nightcodezero/katsini)](https://github.com/nightcodezero/katsini/issues)
-![GitHub pull requests](https://img.shields.io/github/issues-pr/nightcodezero/katsini?color=blue&style=flat-square)
+![CI](https://github.com/arisecode/katsini/actions/workflows/build-and-test.yml/badge.svg)
+[![Release](https://img.shields.io/github/release/arisecode/katsini.svg?style=flat-square)](https://github.com/arisecode/katsini/releases)
+[![codecov](https://codecov.io/gh/arisecode/katsini/branch/master/graph/badge.svg?token=lk4yMGVBOK)](https://codecov.io/gh/arisecode/katsini)
+[![GitHub issues](https://img.shields.io/github/issues/arisecode/katsini)](https://github.com/arisecode/katsini/issues)
+![GitHub pull requests](https://img.shields.io/github/issues-pr/arisecode/katsini?color=blue&style=flat-square)
 
 ## 🍕 Features
 - ⚡️ **Blazingly fast** — Lightning-quick app data retrieval powered by Go
@@ -49,7 +49,7 @@ services:
     ]
 
   app:
-    image: ghcr.io/nightcodezero/katsini:latest
+    image: ghcr.io/arisecode/katsini:latest
     environment:
       CHROME_HOST: browser
       CHROME_PORT: 9222
@@ -145,7 +145,7 @@ The results of the benchmarks are as follows:
 ```bash
 goos: linux
 goarch: amd64
-pkg: github.com/nightcodezero/katsini
+pkg: github.com/arisecode/katsini
 cpu: 12th Gen Intel(R) Core(TM) i7-12700
 BenchmarkGooglePlayStore  	       2	 811015314 ns/op	 3816876 B/op	   21807 allocs/op
 BenchmarkAppleAppStore    	      64	  18702830 ns/op	   95091 B/op	     163 allocs/op
