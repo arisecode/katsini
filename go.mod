@@ -3,8 +3,8 @@ module github.com/arisecode/katsini
 go 1.24.0
 
 require (
-	github.com/chromedp/cdproto v0.0.0-20250224005500-01948a15fe7c
-	github.com/chromedp/chromedp v0.13.0
+	github.com/chromedp/cdproto v0.0.0-20250403032234-65de8f5d025b
+	github.com/chromedp/chromedp v0.13.6
 	github.com/stretchr/testify v1.10.0
 	github.com/testcontainers/testcontainers-go v0.35.0
 	github.com/testcontainers/testcontainers-go/modules/compose v0.35.0
