@@ -36,6 +36,8 @@ var (
 	ErrPageLoad    = errors.New("failed to load page")
 )
 
+const DefaultTimeout = 30 * time.Second
+
 func DisableFetchExceptScripts(ctx context.Context, resourceTypesToBlock []network.ResourceType) func(event any) {
 	return func(event any) {
 		if ev, ok := event.(*fetch.EventRequestPaused); ok {
@@ -101,7 +103,7 @@ func GooglePlayStore(bundleID, lang, country string) (App, error) {
 	}))
 
 	// set a timeout to avoid long waits
-	timeoutCtx, cancel := context.WithTimeout(taskCtx, 30*time.Second) //nolint:mnd // 30 seconds
+	timeoutCtx, cancel := context.WithTimeout(taskCtx, DefaultTimeout)
 	defer cancel()
 
 	xpath := `//div[contains(text(), "About this app") or contains(text(), "About this game")]`
@@ -184,7 +186,7 @@ func HuaweiAppGallery(appID string) (App, error) {
 	}))
 
 	// set a timeout to avoid long waits
-	timeoutCtx, cancel := context.WithTimeout(taskCtx, time.Minute)
+	timeoutCtx, cancel := context.WithTimeout(taskCtx, DefaultTimeout)
 	defer cancel()
 
 	xpathVersion := ` //div[contains(text(), "Version")]/following-sibling::div[1]`
@@ -244,7 +246,7 @@ func AppleAppStore(appID, bundleID, country string) (App, error) {
 		country = "us"
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) //nolint:mnd // 30 seconds
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
 	defer cancel()
 
 	itunesURL := fmt.Sprintf("https://itunes.apple.com/lookup?id=%s&country=%s", appID, country)
@@ -319,7 +321,7 @@ func HuaweiAppGalleryByToken(appID string) (App, error) {
 		return App{}, err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) //nolint:mnd // 30 seconds
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
@@ -382,7 +384,7 @@ func HuaweiAppGalleryByToken(appID string) (App, error) {
 }
 
 func getHuaweiToken() (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) //nolint:mnd // 30 seconds
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
 	defer cancel()
 
 	payload := map[string]string{
