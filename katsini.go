@@ -184,7 +184,7 @@ func HuaweiAppGallery(appID string) (App, error) {
 	}))
 
 	// set a timeout to avoid long waits
-	timeoutCtx, cancel := context.WithTimeout(taskCtx, time.Minute)
+	timeoutCtx, cancel := context.WithTimeout(taskCtx, 5*time.Minute) //nolint:mnd // 5 minute
 	defer cancel()
 
 	xpathVersion := ` //div[contains(text(), "Version")]/following-sibling::div[1]`
