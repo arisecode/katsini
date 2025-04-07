@@ -1,4 +1,4 @@
-FROM golang:1.24.0-bookworm AS build
+FROM golang:1.24.2-bookworm AS build
 
 ARG upx_version=4.2.4
 
