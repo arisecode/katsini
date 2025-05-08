@@ -33,7 +33,7 @@
 ```yaml
 services:
   browser:
-    image: chromedp/headless-shell
+    image: chromedp/headless-shell:136.0.7052.2
     ports:
       - "9222:9222"
     command: [
