@@ -94,7 +94,7 @@ curl http://localhost:8080/playstore?bundleId=com.mediocre.dirac&lang=en&country
 - **URL:** `http://localhost:8080/appstore`
 - **Method:** `GET`
 - **Query Parameter:**
-    - `appId` or `bundleId` (**REQUIRED**): 
+    - `appId` or `bundleId` (**REQUIRED**):
       - `appId`: The unique identifier for the application in the Apple App Store. This can be found in the app's store URL after the `/id<APP_ID>` segment.
       - `bundleId`: The app package name (e.g., `com.thinkdivergent`).
     - `country` (optional, defaults to '**us**'): The two letter country code used to retrieve the applications. Needed when the app is available only in some countries.
