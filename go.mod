@@ -3,7 +3,7 @@ module github.com/arisecode/katsini
 go 1.24.0
 
 require (
-	github.com/chromedp/cdproto v0.0.0-20250630014756-b7288190f53c
+	github.com/chromedp/cdproto v0.0.0-20250706212322-41fb261d0659
 	github.com/chromedp/chromedp v0.13.7
 	github.com/stretchr/testify v1.10.0
 	github.com/testcontainers/testcontainers-go v0.37.0
