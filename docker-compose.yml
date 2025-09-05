@@ -1,6 +1,6 @@
 services:
   browser:
-    image: chromedp/headless-shell:136.0.7052.2
+    image: chromedp/headless-shell:141.0.7390.7
     ports:
       - "9222:9222"
     command: [
