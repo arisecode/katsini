@@ -22,8 +22,6 @@ RUN go generate ./...
 
 RUN CGO_ENABLED=0 GOARCH=amd64 GOOS=linux GOAMD64=v2 go build -trimpath -tags osusergo,netgo -o server -a -ldflags="-s -w -buildid=" -gcflags="all=-m=0 -l=2 -dwarf=false" -installsuffix cgo
 
-RUN upx --ultra-brute -qq server && upx -t server
-
 FROM scratch
 
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
