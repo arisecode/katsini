@@ -1,6 +1,6 @@
 services:
   browser:
-    image: chromedp/headless-shell:136.0.7052.2
+    image: chromedp/headless-shell:142.0.7420.3
     command: [
       "--no-sandbox",
       "--disable-gpu",
