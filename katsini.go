@@ -82,6 +82,7 @@ func GooglePlayStore(bundleID, lang, country string) (App, error) {
 		country = "us"
 	}
 
+	log.Printf("Fetching Google Play Store app data for bundleID: %s, lang: %s, country: %s", bundleID, lang, country)
 	app.url = fmt.Sprintf("https://play.google.com/store/apps/details?id=%s&hl=%s&gl=%s", app.bundleID, lang, country)
 
 	// configure chromedp to use a remote Chrome instance
@@ -168,6 +169,7 @@ func HuaweiAppGallery(appID string) (App, error) {
 		url:   fmt.Sprintf("https://appgallery.huawei.com/app/C%s", appID),
 	}
 
+	log.Printf("Fetching Huawei AppGallery app data for appID: %s", appID)
 	// configure chromedp to use a remote Chrome instance
 	allocCtx, cancel := chromedp.NewRemoteAllocator(context.Background(), fmt.Sprintf("ws://%s:%s/json", os.Getenv("CHROME_HOST"), os.Getenv("CHROME_PORT")))
 	defer cancel()
@@ -254,6 +256,7 @@ func AppleAppStore(appID, bundleID, country string) (App, error) {
 		itunesURL = fmt.Sprintf("https://itunes.apple.com/lookup?bundleId=%s&country=%s", bundleID, country)
 	}
 
+	log.Printf("Fetching AppleAppStore app data for appID: %s", appID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, itunesURL, http.NoBody)
 	if err != nil {
 		return App{}, err
