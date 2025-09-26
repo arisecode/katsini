@@ -30,6 +30,9 @@ WORKDIR /app
 # Copy built binary
 COPY --from=build /app/server ./server
 
+# Prepare writable directory for debugging screenshots
+RUN mkdir -p /app/screenshots && chown katsini:katsini /app/screenshots
+
 # Switch to non-root user
 USER katsini
 

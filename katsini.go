@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -291,25 +291,37 @@ func HuaweiAppGallery(appID string) (App, error) {
 	contentStart := time.Now()
 
 	// Try to wait for main content elements, but capture a screenshot if they fail
+	captureScreenshotForDebug := func() {
+		screenshotDir := "screenshots"
+		if err := os.MkdirAll(screenshotDir, 0o755); err != nil {
+			log.Printf("Failed to prepare screenshot directory: %v", err)
+			return
+		}
+		fileName := fmt.Sprintf("page-error-%d.png", time.Now().UnixNano())
+		filePath := filepath.Join(screenshotDir, fileName)
+		screenshot, shotErr := page.Screenshot(true, nil)
+		if shotErr != nil {
+			log.Printf("Failed to capture page screenshot for debugging: %v", shotErr)
+			return
+		}
+		if writeErr := os.WriteFile(filePath, screenshot, 0o644); writeErr != nil {
+			log.Printf("Failed to write page screenshot for debugging: %v", writeErr)
+			return
+		}
+		log.Printf("Page screenshot saved for debugging: %s", filePath)
+	}
+
 	_, err := page.Timeout(15 * time.Second).Element(`div[class="horizonhomecards"]`)
 	if err != nil {
 		log.Printf("Failed to find horizonhomecard element: %v", err)
-		if screenshot, shotErr := page.Screenshot(true, nil); shotErr != nil {
-			log.Printf("Failed to capture page screenshot for debugging: %v", shotErr)
-		} else {
-			log.Printf("Page screenshot (base64): %s", base64.StdEncoding.EncodeToString(screenshot))
-		}
+		captureScreenshotForDebug()
 		return App{}, fmt.Errorf("required page elements not found - page may not have loaded correctly")
 	}
 
 	_, err = page.Timeout(15 * time.Second).Element(`div[class="componentContainer"]`)
 	if err != nil {
 		log.Printf("Failed to find componentContainer element: %v", err)
-		if screenshot, shotErr := page.Screenshot(true, nil); shotErr != nil {
-			log.Printf("Failed to capture page screenshot for debugging: %v", shotErr)
-		} else {
-			log.Printf("Page screenshot (base64): %s", base64.StdEncoding.EncodeToString(screenshot))
-		}
+		captureScreenshotForDebug()
 		return App{}, fmt.Errorf("required page elements not found - page may not have loaded correctly")
 	}
 
