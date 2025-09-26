@@ -288,8 +288,26 @@ func HuaweiAppGallery(appID string) (App, error) {
 	// wait for main content to load with timeout handling
 	log.Printf("Waiting for main content elements to load")
 	contentStart := time.Now()
-	page.MustElement(`div[class="horizonhomecard"]`)
-	page.MustElement(`div[class="componentContainer"]`)
+
+	// Try to wait for main content elements, but log HTML if they fail
+	_, err := page.Timeout(15 * time.Second).Element(`div[class="horizonhomecard"]`)
+	if err != nil {
+		log.Printf("Failed to find horizonhomecard element: %v", err)
+		// Log the current page HTML for debugging
+		html, _ := page.HTML()
+		log.Printf("Current page HTML (first 2000 chars): %s", truncateString(html, 2000))
+		return App{}, fmt.Errorf("required page elements not found - page may not have loaded correctly")
+	}
+
+	_, err = page.Timeout(15 * time.Second).Element(`div[class="componentContainer"]`)
+	if err != nil {
+		log.Printf("Failed to find componentContainer element: %v", err)
+		// Log the current page HTML for debugging
+		html, _ := page.HTML()
+		log.Printf("Current page HTML (first 2000 chars): %s", truncateString(html, 2000))
+		return App{}, fmt.Errorf("required page elements not found - page may not have loaded correctly")
+	}
+
 	contentTime := time.Since(contentStart)
 	log.Printf("Main content loaded in %v", contentTime)
 
@@ -318,13 +336,21 @@ func HuaweiAppGallery(appID string) (App, error) {
 
 	parsedDate, err := time.Parse("1/2/2006", updated)
 	if err != nil {
-		log.Printf("Error parsing date(%s): %s \n", updated, err)
+		log.Printf("Error parsing date(%s): %s", updated, err)
 		return App{}, err
 	}
 
 	app.updated = parsedDate.Format("02-01-2006")
 
 	return app, nil
+}
+
+// truncateString truncates a string to maxLen characters
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 func AppleAppStore(appID, bundleID, country string) (App, error) {
