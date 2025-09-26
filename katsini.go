@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -289,22 +290,26 @@ func HuaweiAppGallery(appID string) (App, error) {
 	log.Printf("Waiting for main content elements to load")
 	contentStart := time.Now()
 
-	// Try to wait for main content elements, but log HTML if they fail
-	_, err := page.Timeout(15 * time.Second).Element(`div[class="horizonhomecard"]`)
+	// Try to wait for main content elements, but capture a screenshot if they fail
+	_, err := page.Timeout(15 * time.Second).Element(`div[class="horizonhomecards"]`)
 	if err != nil {
 		log.Printf("Failed to find horizonhomecard element: %v", err)
-		// Log the current page HTML for debugging
-		html, _ := page.HTML()
-		log.Printf("Current page HTML (full): %s", html)
+		if screenshot, shotErr := page.Screenshot(true, nil); shotErr != nil {
+			log.Printf("Failed to capture page screenshot for debugging: %v", shotErr)
+		} else {
+			log.Printf("Page screenshot (base64): %s", base64.StdEncoding.EncodeToString(screenshot))
+		}
 		return App{}, fmt.Errorf("required page elements not found - page may not have loaded correctly")
 	}
 
 	_, err = page.Timeout(15 * time.Second).Element(`div[class="componentContainer"]`)
 	if err != nil {
 		log.Printf("Failed to find componentContainer element: %v", err)
-		// Log the current page HTML for debugging
-		html, _ := page.HTML()
-		log.Printf("Current page HTML (full): %s", html)
+		if screenshot, shotErr := page.Screenshot(true, nil); shotErr != nil {
+			log.Printf("Failed to capture page screenshot for debugging: %v", shotErr)
+		} else {
+			log.Printf("Page screenshot (base64): %s", base64.StdEncoding.EncodeToString(screenshot))
+		}
 		return App{}, fmt.Errorf("required page elements not found - page may not have loaded correctly")
 	}
 
