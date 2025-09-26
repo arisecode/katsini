@@ -1,0 +1,45 @@
+# Multi-stage Dockerfile with headless Chrome
+FROM golang:1.25.1-bookworm AS build
+
+WORKDIR /app
+
+# Copy and download dependencies
+COPY go.mod go.sum ./
+RUN go mod download && go mod verify
+
+# Copy source and build
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o server
+
+# Runtime stage
+FROM debian:bookworm-slim
+
+# Install headless Chrome and dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    chromium \
+    ca-certificates \
+    fonts-liberation \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN useradd -m -u 1000 katsini
+
+WORKDIR /app
+
+# Copy built binary
+COPY --from=build /app/server ./server
+
+# Switch to non-root user
+USER katsini
+
+# Set environment variables to use local Chrome
+ENV CHROME_HOST=localhost
+ENV CHROME_PORT=9222
+
+# Start Chrome in background and run Go app
+CMD chromium --headless=new --no-sandbox --disable-gpu --remote-debugging-address=0.0.0.0 --remote-debugging-port=9222 & \
+    sleep 3 && \
+    exec ./server
+
+EXPOSE 8080

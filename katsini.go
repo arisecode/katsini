@@ -11,14 +11,11 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
+	"sync"
 	"time"
 
-	"github.com/chromedp/cdproto/cdp"
-	"github.com/chromedp/cdproto/fetch"
-	"github.com/chromedp/cdproto/network"
-
-	"github.com/chromedp/chromedp"
+	"github.com/go-rod/rod"
+	"github.com/go-rod/rod/lib/launcher"
 )
 
 type App struct {
@@ -38,35 +35,47 @@ var (
 
 const DefaultTimeout = 30 * time.Second
 
-func DisableFetchExceptScripts(ctx context.Context, resourceTypesToBlock []network.ResourceType) func(event any) {
-	return func(event any) {
-		if ev, ok := event.(*fetch.EventRequestPaused); ok {
-			go func() {
-				c := chromedp.FromContext(ctx)
-				cdpCtx := cdp.WithExecutor(ctx, c.Target)
+var (
+	browserMutex sync.Mutex
+	sharedBrowser *rod.Browser
+)
 
-				shouldBlock := false
-				for _, resourceType := range resourceTypesToBlock {
-					if ev.ResourceType == resourceType {
-						shouldBlock = true
-						break
-					}
-				}
+// getBrowser returns a shared browser instance or creates a new one
+func getBrowser() *rod.Browser {
+	browserMutex.Lock()
+	defer browserMutex.Unlock()
 
-				if shouldBlock {
-					if err := fetch.FailRequest(ev.RequestID, network.ErrorReasonBlockedByClient).Do(cdpCtx); err != nil {
-						log.Printf("Failed to block request: %s \n", err)
-						return
-					}
-				} else {
-					if err := fetch.ContinueRequest(ev.RequestID).Do(cdpCtx); err != nil {
-						log.Printf("Failed to continue request: %s \n", err)
-						return
-					}
-				}
-			}()
-		}
+	// If we already have a browser, try to reuse it
+	if sharedBrowser != nil {
+		return sharedBrowser
 	}
+
+	chromeHost := os.Getenv("CHROME_HOST")
+	chromePort := os.Getenv("CHROME_PORT")
+
+	var browser *rod.Browser
+	if chromeHost != "" && chromePort != "" {
+		// Use remote Chrome instance - create a RemoteURL to connect to existing Chrome
+		u := launcher.MustResolveURL(fmt.Sprintf("http://%s:%s", chromeHost, chromePort))
+		browser = rod.New().ControlURL(u)
+	} else {
+		// Use local Chrome
+		browser = rod.New()
+	}
+
+	// Connect with error handling
+	var err error
+	for i := 0; i < 3; i++ {
+		if err = browser.Connect(); err == nil {
+			sharedBrowser = browser
+			return sharedBrowser
+		}
+		log.Printf("Browser connection attempt %d failed: %v", i+1, err)
+		time.Sleep(time.Second * 2)
+	}
+
+	// If all retries fail, panic as expected by the original MustConnect behavior
+	panic(fmt.Sprintf("Failed to connect to browser after 3 attempts: %v", err))
 }
 
 func GooglePlayStore(bundleID, lang, country string) (App, error) {
@@ -85,29 +94,16 @@ func GooglePlayStore(bundleID, lang, country string) (App, error) {
 	log.Printf("Fetching Google Play Store app data for bundleID: %s, lang: %s, country: %s", bundleID, lang, country)
 	app.url = fmt.Sprintf("https://play.google.com/store/apps/details?id=%s&hl=%s&gl=%s", app.bundleID, lang, country)
 
-	// configure chromedp to use a remote Chrome instance
-	allocCtx, cancel := chromedp.NewRemoteAllocator(context.Background(), fmt.Sprintf("ws://%s:%s/json", os.Getenv("CHROME_HOST"), os.Getenv("CHROME_PORT")))
-	defer cancel()
+	// connect to remote Chrome instance
+	// get shared browser instance
+	browser := getBrowser()
+	// Don't defer browser.MustClose() since it's shared
 
-	// create chromedp context
-	taskCtx, cancel := chromedp.NewContext(allocCtx,
-		chromedp.WithLogf(log.Printf),
-		chromedp.WithDebugf(log.Printf),
-		chromedp.WithErrorf(log.Printf)) // enable debug log to see the CDP traffics.
+	// create a page with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
 	defer cancel()
-
-	chromedp.ListenTarget(taskCtx, DisableFetchExceptScripts(taskCtx, []network.ResourceType{
-		network.ResourceTypeImage,
-		network.ResourceTypeStylesheet,
-		network.ResourceTypeFont,
-		network.ResourceTypeMedia,
-		network.ResourceTypeManifest,
-		network.ResourceTypeOther,
-	}))
-
-	// set a timeout to avoid long waits
-	timeoutCtx, cancel := context.WithTimeout(taskCtx, DefaultTimeout)
-	defer cancel()
+	page := browser.Context(ctx).MustPage()
+	defer page.MustClose()
 
 	xpath := `//div[contains(text(), "About this app") or contains(text(), "About this game")]`
 	xpathTitle := `//div[contains(text(), "About this app") or contains(text(), "About this game")]/preceding-sibling::h5[1]`
@@ -115,45 +111,38 @@ func GooglePlayStore(bundleID, lang, country string) (App, error) {
 	xpathUpdated := `//div[contains(text(), "Updated")]/following-sibling::div[1]`
 	xpathDeveloper := `//div[contains(text(), "Offered by")]/following-sibling::div[1]`
 
-	var notFound bool
-	var updated string
-
-	// run the task to navigate and extract the version text
-	if err := chromedp.Run(timeoutCtx,
-		fetch.Enable(),
-		chromedp.Navigate(app.url),
-		// Check if app exists using JavaScript
-		chromedp.Evaluate(`document.body.innerText.includes("We're sorry, the requested URL was not found on this server.")`, &notFound),
-		chromedp.ActionFunc(func(_ context.Context) error {
-			if notFound {
-				return ErrAppNotFound
-			}
-			return nil
-		}),
-		// wait for the element is visible
-		chromedp.WaitVisible(`button[aria-label="See more information on About this app"], button[aria-label="See more information on About this game"]`),
-		// click the button
-		chromedp.Click(`button[aria-label="See more information on About this app"], button[aria-label="See more information on About this game"]`),
-		// wait for the element is visible
-		chromedp.WaitVisible(xpath),
-		// get app title
-		chromedp.Text(xpathTitle, &app.title),
-		// get app version
-		chromedp.Text(xpathVersion, &app.version),
-		// get app updated
-		chromedp.Text(xpathUpdated, &updated),
-		// get app developer
-		chromedp.Text(xpathDeveloper, &app.developer),
-	); err != nil {
-		switch {
-		case strings.Contains(err.Error(), "context deadline exceeded"):
-			return App{}, fmt.Errorf("%w: timeout while extracting data", ErrPageLoad)
-		case errors.Is(err, ErrAppNotFound):
-			return App{}, ErrAppNotFound
-		default:
-			return App{}, fmt.Errorf("failed to extract app data: %w", err)
-		}
+	// navigate to the page
+	if err := page.Navigate(app.url); err != nil {
+		return App{}, fmt.Errorf("failed to navigate: %w", err)
 	}
+	page.MustWaitLoad()
+
+	// check if app exists
+	notFound, _ := page.Eval(`() => document.body.innerText.includes("We're sorry, the requested URL was not found on this server.")`)
+	if notFound.Value.Bool() {
+		return App{}, ErrAppNotFound
+	}
+
+	// wait for and click the "About this app" button
+	buttonSelector := `button[aria-label="See more information on About this app"], button[aria-label="See more information on About this game"]`
+	button := page.MustElement(buttonSelector)
+	button.MustClick()
+
+	// wait for the expanded section to appear
+	page.MustElementX(xpath)
+
+	// extract app information
+	titleElement := page.MustElementX(xpathTitle)
+	app.title = titleElement.MustText()
+
+	versionElement := page.MustElementX(xpathVersion)
+	app.version = versionElement.MustText()
+
+	updatedElement := page.MustElementX(xpathUpdated)
+	updated := updatedElement.MustText()
+
+	developerElement := page.MustElementX(xpathDeveloper)
+	app.developer = developerElement.MustText()
 
 	parsedDate, err := time.Parse("Jan 2, 2006", updated)
 	if err != nil {
@@ -172,70 +161,54 @@ func HuaweiAppGallery(appID string) (App, error) {
 	}
 
 	log.Printf("Fetching Huawei AppGallery app data for appID: %s", appID)
-	// configure chromedp to use a remote Chrome instance
-	allocCtx, cancel := chromedp.NewRemoteAllocator(context.Background(), fmt.Sprintf("ws://%s:%s/json", os.Getenv("CHROME_HOST"), os.Getenv("CHROME_PORT")))
-	defer cancel()
 
-	// create chromedp context
-	taskCtx, cancel := chromedp.NewContext(allocCtx,
-		chromedp.WithLogf(log.Printf),
-		chromedp.WithDebugf(log.Printf),
-		chromedp.WithErrorf(log.Printf)) // enable debug log to see the CDP traffics.
-	// chromedp.WithDebugf(log.Printf),
-	defer cancel()
+	// connect to remote Chrome instance
+	// get shared browser instance
+	browser := getBrowser()
+	// Don't defer browser.MustClose() since it's shared
 
-	chromedp.ListenTarget(taskCtx, DisableFetchExceptScripts(taskCtx, []network.ResourceType{
-		network.ResourceTypeImage,
-		network.ResourceTypeFont,
-		network.ResourceTypeMedia,
-		network.ResourceTypeManifest,
-		network.ResourceTypeOther,
-	}))
-
-	// set a timeout to avoid long waits
-	timeoutCtx, cancel := context.WithTimeout(taskCtx, DefaultTimeout)
+	// create a page with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
 	defer cancel()
+	page := browser.Context(ctx).MustPage()
+	defer page.MustClose()
 
 	xpathVersion := ` //div[contains(text(), "Version")]/following-sibling::div[1]`
 	xpathUpdated := `//div[contains(text(), "Updated")]/following-sibling::div[1]`
 	xpathDeveloper := `//div[contains(text(), "Developer")]/following-sibling::div[1]`
 
-	var notFound bool
-	var updated string
-
-	if err := chromedp.Run(timeoutCtx,
-		fetch.Enable(),
-		chromedp.Navigate(app.url),
-		chromedp.WaitVisible(`div[class="horizonhomecard"]`),
-		chromedp.WaitVisible(`div[class="componentContainer"]`),
-		// check if app exists using JavaScript
-		chromedp.Evaluate(`document.querySelector('.componentContainer').offsetHeight < 500`, &notFound),
-		chromedp.ActionFunc(func(_ context.Context) error {
-			if notFound {
-				return ErrAppNotFound
-			}
-			return nil
-		}),
-		// wait for the element is visible to get the app title
-		chromedp.Text(`div.center_info > div.title`, &app.title, chromedp.NodeVisible),
-		// get app version
-		chromedp.Text(xpathVersion, &app.version),
-		// get app updated
-		chromedp.Text(xpathUpdated, &updated),
-		// get app developer
-		chromedp.Text(xpathDeveloper, &app.developer),
-		// get app package name
-		chromedp.Evaluate(`document.querySelector('div[package]').getAttribute('package')`, &app.bundleID),
-	); err != nil {
-		switch {
-		case strings.Contains(err.Error(), "context deadline exceeded"):
-			return App{}, fmt.Errorf("%w: timeout while extracting data", ErrPageLoad)
-		case errors.Is(err, ErrAppNotFound):
-			return App{}, ErrAppNotFound
-		default:
-			return App{}, fmt.Errorf("failed to extract app data: %w", err)
-		}
+	// navigate to the page
+	if err := page.Navigate(app.url); err != nil {
+		return App{}, fmt.Errorf("failed to navigate: %w", err)
 	}
+	page.MustWaitLoad()
+
+	// wait for main content to load
+	page.MustElement(`div[class="horizonhomecard"]`)
+	page.MustElement(`div[class="componentContainer"]`)
+
+	// check if app exists by checking container height
+	containerHeight, _ := page.Eval(`() => document.querySelector('.componentContainer').offsetHeight`)
+	if int(containerHeight.Value.Num()) < 500 {
+		return App{}, ErrAppNotFound
+	}
+
+	// extract app information
+	titleElement := page.MustElement(`div.center_info > div.title`)
+	app.title = titleElement.MustText()
+
+	versionElement := page.MustElementX(xpathVersion)
+	app.version = versionElement.MustText()
+
+	updatedElement := page.MustElementX(xpathUpdated)
+	updated := updatedElement.MustText()
+
+	developerElement := page.MustElementX(xpathDeveloper)
+	app.developer = developerElement.MustText()
+
+	// get app package name
+	packageName, _ := page.Eval(`() => document.querySelector('div[package]').getAttribute('package')`)
+	app.bundleID = packageName.Value.Str()
 
 	parsedDate, err := time.Parse("1/2/2006", updated)
 	if err != nil {
