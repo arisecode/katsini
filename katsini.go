@@ -295,7 +295,7 @@ func HuaweiAppGallery(appID string) (App, error) {
 		log.Printf("Failed to find horizonhomecard element: %v", err)
 		// Log the current page HTML for debugging
 		html, _ := page.HTML()
-		log.Printf("Current page HTML (first 2000 chars): %s", truncateString(html, 2000))
+		log.Printf("Current page HTML (full): %s", html)
 		return App{}, fmt.Errorf("required page elements not found - page may not have loaded correctly")
 	}
 
@@ -304,7 +304,7 @@ func HuaweiAppGallery(appID string) (App, error) {
 		log.Printf("Failed to find componentContainer element: %v", err)
 		// Log the current page HTML for debugging
 		html, _ := page.HTML()
-		log.Printf("Current page HTML (first 2000 chars): %s", truncateString(html, 2000))
+		log.Printf("Current page HTML (full): %s", html)
 		return App{}, fmt.Errorf("required page elements not found - page may not have loaded correctly")
 	}
 
