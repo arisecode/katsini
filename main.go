@@ -145,6 +145,14 @@ func main() {
 	// Create a new mux router
 	mux := http.NewServeMux()
 
+	// Expose screenshots directory if present
+	if err := os.MkdirAll("screenshots", 0o755); err != nil {
+		log.Printf("Failed to ensure screenshots directory exists: %v", err)
+	} else {
+		fileServer := http.FileServer(http.Dir("screenshots"))
+		mux.Handle("/screenshots/", http.StripPrefix("/screenshots/", fileServer))
+	}
+
 	// Register routes
 	mux.HandleFunc("/playstore", handleGooglePlayStore)
 	mux.HandleFunc("/appstore", handleAppleAppStore)
