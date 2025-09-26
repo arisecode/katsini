@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,12 +33,14 @@ type App struct {
 var (
 	ErrAppNotFound = errors.New("app not found")
 	ErrPageLoad    = errors.New("failed to load page")
+	ErrDNSTimeout  = errors.New("DNS resolution timeout")
+	ErrDNSFailed   = errors.New("DNS resolution failed")
 )
 
 const DefaultTimeout = 30 * time.Second
 
 var (
-	browserMutex sync.Mutex
+	browserMutex  sync.Mutex
 	sharedBrowser *rod.Browser
 )
 
@@ -59,8 +63,31 @@ func getBrowser() *rod.Browser {
 		u := launcher.MustResolveURL(fmt.Sprintf("http://%s:%s", chromeHost, chromePort))
 		browser = rod.New().ControlURL(u)
 	} else {
-		// Use local Chrome
-		browser = rod.New()
+		// Use local Chrome with custom DNS configuration
+		l := launcher.New()
+
+		// Add VPS-optimized Chrome flags
+		l = l.Set("--no-sandbox").
+			Set("--disable-gpu").
+			Set("--disable-dev-shm-usage").
+			Set("--no-first-run").
+			Set("--disable-background-timer-throttling").
+			Set("--disable-backgrounding-occluded-windows").
+			Set("--disable-renderer-backgrounding")
+
+		// Configure custom DNS servers if provided
+		customDNS := getCustomDNSServers()
+		if len(customDNS) > 0 {
+			dnsString := strings.Join(customDNS, ",")
+			l = l.Set("--host-resolver-rules", fmt.Sprintf("MAP * 0.0.0.0, EXCLUDE %s", dnsString))
+			log.Printf("Configured Chrome with custom DNS servers: %s", dnsString)
+		}
+
+		// Add specific DNS overrides for Huawei domains
+		l = l.Set("--host-resolver-rules", "MAP appgallery.huawei.com 47.89.61.45")
+
+		u := l.MustLaunch()
+		browser = rod.New().ControlURL(u)
 	}
 
 	// Connect with error handling
@@ -154,6 +181,44 @@ func GooglePlayStore(bundleID, lang, country string) (App, error) {
 	return app, nil
 }
 
+// checkDNSResolution tests DNS resolution for a given hostname
+func checkDNSResolution(hostname string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	log.Printf("Checking DNS resolution for %s", hostname)
+	start := time.Now()
+
+	resolver := &net.Resolver{}
+	ips, err := resolver.LookupIPAddr(ctx, hostname)
+
+	duration := time.Since(start)
+	log.Printf("DNS resolution for %s took %v", hostname, duration)
+
+	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("DNS resolution timeout for %s after %v", hostname, timeout)
+		}
+		return fmt.Errorf("DNS resolution failed for %s: %w", hostname, err)
+	}
+
+	if len(ips) == 0 {
+		return fmt.Errorf("no IP addresses found for %s", hostname)
+	}
+
+	log.Printf("DNS resolution successful for %s: found %d IP addresses", hostname, len(ips))
+	return nil
+}
+
+// getCustomDNSServers returns custom DNS servers from environment variable
+func getCustomDNSServers() []string {
+	dnsServers := os.Getenv("DNS_SERVERS")
+	if dnsServers == "" {
+		return nil
+	}
+	return strings.Split(dnsServers, ",")
+}
+
 func HuaweiAppGallery(appID string) (App, error) {
 	app := App{
 		appID: appID,
@@ -161,6 +226,30 @@ func HuaweiAppGallery(appID string) (App, error) {
 	}
 
 	log.Printf("Fetching Huawei AppGallery app data for appID: %s", appID)
+
+	// Check DNS resolution first to identify DNS vs other issues
+	hostname := "appgallery.huawei.com"
+	dnsTimeout := 10 * time.Second
+	if err := checkDNSResolution(hostname, dnsTimeout); err != nil {
+		log.Printf("DNS resolution failed for %s: %v", hostname, err)
+
+		// Wrap the DNS error for better error reporting
+		var dnsErr error
+		if strings.Contains(err.Error(), "timeout") {
+			dnsErr = fmt.Errorf("%w: %s", ErrDNSTimeout, err.Error())
+		} else {
+			dnsErr = fmt.Errorf("%w: %s", ErrDNSFailed, err.Error())
+		}
+
+		// Try fallback with token-based API if DNS fails
+		log.Printf("Attempting fallback to token-based API for appID: %s", appID)
+		fallbackApp, fallbackErr := HuaweiAppGalleryByToken(appID)
+		if fallbackErr != nil {
+			return App{}, fmt.Errorf("%w (fallback API error: %v)", dnsErr, fallbackErr)
+		}
+		log.Printf("Successfully retrieved app data via fallback API despite DNS issues")
+		return fallbackApp, nil
+	}
 
 	// connect to remote Chrome instance
 	// get shared browser instance
@@ -178,14 +267,31 @@ func HuaweiAppGallery(appID string) (App, error) {
 	xpathDeveloper := `//div[contains(text(), "Developer")]/following-sibling::div[1]`
 
 	// navigate to the page
+	log.Printf("Navigating to %s", app.url)
+	start := time.Now()
 	if err := page.Navigate(app.url); err != nil {
-		return App{}, fmt.Errorf("failed to navigate: %w", err)
+		duration := time.Since(start)
+		log.Printf("Page navigation failed after %v: %v", duration, err)
+
+		// Distinguish between timeout and other errors
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) || strings.Contains(err.Error(), "timeout") {
+			return App{}, fmt.Errorf("%w: page navigation timeout after %v to %s", ErrPageLoad, duration, app.url)
+		}
+		return App{}, fmt.Errorf("%w: %s (took %v)", ErrPageLoad, err.Error(), duration)
 	}
+
+	navigationTime := time.Since(start)
+	log.Printf("Page navigation completed in %v", navigationTime)
+
 	page.MustWaitLoad()
 
-	// wait for main content to load
+	// wait for main content to load with timeout handling
+	log.Printf("Waiting for main content elements to load")
+	contentStart := time.Now()
 	page.MustElement(`div[class="horizonhomecard"]`)
 	page.MustElement(`div[class="componentContainer"]`)
+	contentTime := time.Since(contentStart)
+	log.Printf("Main content loaded in %v", contentTime)
 
 	// check if app exists by checking container height
 	containerHeight, _ := page.Eval(`() => document.querySelector('.componentContainer').offsetHeight`)
@@ -245,7 +351,11 @@ func AppleAppStore(appID, bundleID, country string) (App, error) {
 	if err != nil {
 		return App{}, fmt.Errorf("failed to get app: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			log.Printf("Failed to close response body: %v", closeErr)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return App{}, ErrAppNotFound
@@ -322,7 +432,11 @@ func HuaweiAppGalleryByToken(appID string) (App, error) {
 		log.Printf("Failed to get app from Huawei AppGallery: %v", err)
 		return App{}, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			log.Printf("Failed to close response body: %v", closeErr)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("Status code is not OK: %d", resp.StatusCode)
@@ -394,7 +508,11 @@ func getHuaweiToken() (string, error) {
 		log.Printf("Failed to get response: %v", err)
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			log.Printf("Failed to close response body: %v", closeErr)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("Status code is not OK: %d", resp.StatusCode)
