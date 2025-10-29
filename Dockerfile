@@ -22,9 +22,15 @@ RUN go generate ./...
 
 RUN CGO_ENABLED=0 GOARCH=amd64 GOOS=linux GOAMD64=v2 go build -trimpath -tags osusergo,netgo -o server -a -ldflags="-s -w -buildid=" -gcflags="all=-m=0 -l=2 -dwarf=false" -installsuffix cgo
 
-FROM scratch
+FROM debian:bookworm-slim
 
-COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    chromium \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=build /app/server /server
+
+EXPOSE 8080
 
 ENTRYPOINT ["/server"]

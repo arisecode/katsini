@@ -1,27 +1,6 @@
 services:
-  browser:
-    image: chromedp/headless-shell:136.0.7052.2
-    command: [
-      "--no-sandbox",
-      "--disable-gpu",
-      "--remote-debugging-address=0.0.0.0",
-      "--remote-debugging-port=9222",
-      "--disable-extensions",
-      "--enable-automation",
-      "--disable-blink-features=AutomationControlled",
-      "--incognito",
-      "--user-agent=Mozilla/5.0 (Windows NT 6.3; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/73.0.3683.103 Safari/537.36"
-    ]
-    networks:
-      - dokploy-network
-
   app:
     image: ghcr.io/arisecode/katsini:latest
-    environment:
-      CHROME_HOST: browser
-      CHROME_PORT: 9222
-    depends_on:
-      - browser
     networks:
       - dokploy-network
     labels:
