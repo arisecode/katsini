@@ -278,16 +278,16 @@ func AppleAppStore(appID, bundleID, country string) (App, error) {
 	}
 
 	var response struct {
-		ResultCount int `json:"resultCount"`
-		Results     []struct {
+		Results []struct {
 			Version                   string `json:"version"`
 			CurrentVersionReleaseDate string `json:"currentVersionReleaseDate"`
 			BundleID                  string `json:"bundleId"`
-			TrackID                   int    `json:"trackId"`
 			TrackName                 string `json:"trackName"`
 			TrackViewURL              string `json:"trackViewUrl"`
 			ArtistName                string `json:"artistName"`
+			TrackID                   int    `json:"trackId"`
 		}
+		ResultCount int `json:"resultCount"`
 	}
 
 	if err = json.Unmarshal(body, &response); err != nil {
