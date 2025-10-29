@@ -90,10 +90,7 @@ func GooglePlayStore(bundleID, lang, country string) (App, error) {
 	defer cancel()
 
 	// create chromedp context
-	taskCtx, cancel := chromedp.NewContext(allocCtx,
-		chromedp.WithLogf(log.Printf),
-		chromedp.WithDebugf(log.Printf),
-		chromedp.WithErrorf(log.Printf)) // enable debug log to see the CDP traffics.
+	taskCtx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
 
 	chromedp.ListenTarget(taskCtx, DisableFetchExceptScripts(taskCtx, []network.ResourceType{
@@ -177,11 +174,7 @@ func HuaweiAppGallery(appID string) (App, error) {
 	defer cancel()
 
 	// create chromedp context
-	taskCtx, cancel := chromedp.NewContext(allocCtx,
-		chromedp.WithLogf(log.Printf),
-		chromedp.WithDebugf(log.Printf),
-		chromedp.WithErrorf(log.Printf)) // enable debug log to see the CDP traffics.
-	// chromedp.WithDebugf(log.Printf),
+	taskCtx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
 
 	chromedp.ListenTarget(taskCtx, DisableFetchExceptScripts(taskCtx, []network.ResourceType{
