@@ -7,7 +7,7 @@
 <p>A blazing-fast, lightweight, and user-friendly tool built with <a href="https://golang.org">Go</a> for retrieving app information from major app stores.</p>
 
 [![made-with-Go](https://img.shields.io/badge/Made%20with-Go-blue)](https://go.dev/)
-![CI](https://github.com/arisecode/katsini/actions/workflows/build-and-test.yml/badge.svg)
+![CI](https://github.com/arisecode/katsini/actions/workflows/ci.yml/badge.svg)
 [![Release](https://img.shields.io/github/release/arisecode/katsini.svg?style=flat-square)](https://github.com/arisecode/katsini/releases)
 [![codecov](https://codecov.io/gh/arisecode/katsini/branch/master/graph/badge.svg?token=lk4yMGVBOK)](https://codecov.io/gh/arisecode/katsini)
 [![GitHub issues](https://img.shields.io/github/issues/arisecode/katsini)](https://github.com/arisecode/katsini/issues)
