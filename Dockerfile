@@ -1,30 +1,39 @@
-FROM golang:1.25.1-bookworm AS build
+FROM golang:1.25.1-alpine AS build
 
-ARG upx_version=4.2.4
-
-RUN apt-get update && apt-get install -y --no-install-recommends xz-utils && \
-  curl -Ls https://github.com/upx/upx/releases/download/v${upx_version}/upx-${upx_version}-amd64_linux.tar.xz -o - | tar xvJf - -C /tmp && \
-  cp /tmp/upx-${upx_version}-amd64_linux/upx /usr/local/bin/ && \
-  chmod +x /usr/local/bin/upx && \
-  apt-get remove -y xz-utils && \
-  rm -rf /var/lib/apt/lists/*
+# Install build dependencies and UPX
+RUN apk add --no-cache curl upx
 
 WORKDIR /app
 
-COPY go.mod ./
-COPY go.sum ./
-
+COPY go.mod go.sum ./
 RUN go mod download && go mod verify
 
 COPY . .
-
 RUN go generate ./...
 
-RUN CGO_ENABLED=0 GOARCH=amd64 GOOS=linux GOAMD64=v2 go build -trimpath -tags osusergo,netgo -o server -a -ldflags="-s -w -buildid=" -gcflags="all=-m=0 -l=2 -dwarf=false" -installsuffix cgo
+# Build the binary for native architecture
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -tags osusergo,netgo -o server -a -ldflags="-s -w -buildid=" -gcflags="all=-m=0 -l=2 -dwarf=false" -installsuffix cgo
 
-FROM scratch
+# Compress the binary with UPX
+RUN upx --best --lzma /app/server
 
-COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+# Final Alpine-based stage
+FROM alpine:latest
+
+# Install Chromium and required packages
+RUN apk add --no-cache \
+    chromium \
+    chromium-chromedriver \
+    ca-certificates \
+    xvfb \
+    xauth \
+    font-noto-emoji \
+    ttf-freefont \
+    && rm -rf /var/cache/apk/*
+
+# Copy the compressed application binary
 COPY --from=build /app/server /server
+
+EXPOSE 8080
 
 ENTRYPOINT ["/server"]

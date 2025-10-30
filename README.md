@@ -28,41 +28,16 @@
 - ✅ [Huawei AppGallery](https://appgallery.huawei.com)
 
 ## 🐳 Quick Start
-- **[Docker](https://docs.docker.com/engine/install/)** and **[Docker Compose](https://docs.docker.com/compose/install/)** must be installed on your machine.
-- Copy code below and save it as `docker-compose.yml`.
-```yaml
-services:
-  browser:
-    image: chromedp/headless-shell:136.0.7052.2
-    ports:
-      - "9222:9222"
-    command: [
-      "--no-sandbox",
-      "--disable-gpu",
-      "--remote-debugging-address=0.0.0.0",
-      "--remote-debugging-port=9222",
-      "--disable-extensions",
-      "--enable-automation",
-      "--disable-blink-features=AutomationControlled",
-      "--incognito",
-      "--user-agent=Mozilla/5.0 (Windows NT 6.3; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/73.0.3683.103 Safari/537.36"
-    ]
 
-  app:
-    image: ghcr.io/arisecode/katsini:latest
-    environment:
-      CHROME_HOST: browser
-      CHROME_PORT: 9222
-    ports:
-      - "8080:8080"
-    depends_on:
-      - browser
-    links:
-      - browser
+Katsini comes with Chrome bundled in the container - no separate services or configuration needed!
+
+```bash
+docker run -p 8080:8080 ghcr.io/arisecode/katsini:latest
 ```
-- Run `docker-compose up` to start the service.
 
 🎉 That's it! You can now access the service at `http://localhost:8080`
+
+**Note:** Chrome is automatically bundled with anti-bot protection. Just run the single container and you're ready to go!
 
 ## 📖 Usage
 
@@ -120,6 +95,7 @@ curl http://localhost:8080/appstore?appId=1592213654&country=us
 - **Method:** `GET`
 - **Query Parameter:**
     - `appId` (**REQUIRED**): The unique identifier for the application in the Huawei AppGallery. This can be found in the app's store URL after the `/app/C<APP_ID>` segment.
+- **Tip:** AppGallery can hide regional apps when the request originates from a datacenter IP. Set the environment variables `HUAWEI_CLIENT_ID` and `HUAWEI_CLIENT_SECRET` to enable the official Huawei API fallback for those cases.
 ```bash
 curl http://localhost:8080/appgallery?appId=100102149
 ```
@@ -158,6 +134,19 @@ The benchmark results show the average time taken and how many iterations were r
 - `B/op` : The average number of bytes allocated per operation.
 - `allocs/op` : The average number of memory allocations per operation.
 
+## 🔒 Anti-Bot Protection
+
+Katsini uses [chromedp-undetected](https://github.com/Davincible/chromedp-undetected) to bypass basic anti-bot detection mechanisms. This helps ensure reliable data fetching from app stores that implement bot protection.
+
+**Features:**
+- 🛡️ Automatic stealth mode when available
+- 🔄 Graceful fallback to regular chromedp on unsupported platforms
+- 🤖 Mimics real browser behavior to avoid detection
+- ⚡ No performance impact on regular operations
+
+**Note:** The undetected mode works best in Linux environments with headless Chrome. On macOS and other platforms, it automatically falls back to standard chromedp mode.
+
 ## 🔋 Uses
 Here are some of the libraries that are used in this project:
 - [Chromedp](https://github.com/chromedp/chromedp) - A faster, simpler way to drive browsers in Go.
+- [chromedp-undetected](https://github.com/Davincible/chromedp-undetected) - Anti-bot detection bypass for chromedp.
