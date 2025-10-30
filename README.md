@@ -95,7 +95,23 @@ curl http://localhost:8080/appstore?appId=1592213654&country=us
 - **Method:** `GET`
 - **Query Parameter:**
     - `appId` (**REQUIRED**): The unique identifier for the application in the Huawei AppGallery. This can be found in the app's store URL after the `/app/C<APP_ID>` segment.
-- **Tip:** AppGallery can hide regional apps when the request originates from a datacenter IP. Set the environment variables `HUAWEI_CLIENT_ID` and `HUAWEI_CLIENT_SECRET` to enable the official Huawei API fallback for those cases.
+
+**⚠️ Important for VPS/Datacenter Deployments:**
+
+Huawei AppGallery actively blocks requests from datacenter/VPS IP addresses, returning empty pages even though the app exists. If you're deploying on a VPS (AWS, DigitalOcean, Vultr, etc.) and experiencing issues where apps return empty results or "app not found" errors, you **must** configure the API fallback:
+
+1. Register at [Huawei Developer Console](https://developer.huawei.com/consumer/en/console)
+2. Create an app/project and enable AppGallery Publishing API
+3. Get your OAuth2 credentials (Client ID and Client Secret)
+4. Set environment variables:
+   ```bash
+   docker run -p 8080:8080 \
+     -e HUAWEI_CLIENT_ID="your_client_id" \
+     -e HUAWEI_CLIENT_SECRET="your_client_secret" \
+     ghcr.io/arisecode/katsini:latest
+   ```
+
+The application will automatically fallback to the official Huawei API when scraping fails, bypassing IP restrictions.
 ```bash
 curl http://localhost:8080/appgallery?appId=100102149
 ```
