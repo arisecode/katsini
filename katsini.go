@@ -39,6 +39,15 @@ var (
 
 const DefaultTimeout = 30 * time.Second
 
+// Common resource types to block for faster page loading
+var commonResourceTypesToBlock = []network.ResourceType{
+	network.ResourceTypeImage,
+	network.ResourceTypeFont,
+	network.ResourceTypeMedia,
+	network.ResourceTypeManifest,
+	network.ResourceTypeOther,
+}
+
 // createBrowserContext creates a browser context with anti-bot protection
 // It automatically detects whether to use local Chrome or remote Chrome based on environment variables
 func createBrowserContext() (context.Context, context.CancelFunc, error) {
@@ -135,14 +144,7 @@ func GooglePlayStore(bundleID, lang, country string) (App, error) {
 	}
 	defer cancel()
 
-	chromedp.ListenTarget(taskCtx, DisableFetchExceptScripts(taskCtx, []network.ResourceType{
-		network.ResourceTypeImage,
-		network.ResourceTypeStylesheet,
-		network.ResourceTypeFont,
-		network.ResourceTypeMedia,
-		network.ResourceTypeManifest,
-		network.ResourceTypeOther,
-	}))
+	chromedp.ListenTarget(taskCtx, DisableFetchExceptScripts(taskCtx, append(commonResourceTypesToBlock, network.ResourceTypeStylesheet)))
 
 	// set a timeout to avoid long waits
 	timeoutCtx, cancel := context.WithTimeout(taskCtx, DefaultTimeout)
@@ -204,8 +206,70 @@ func GooglePlayStore(bundleID, lang, country string) (App, error) {
 	return app, nil
 }
 
+// parseFlexibleDate attempts to parse a date string using multiple common formats
+func parseFlexibleDate(dateStr string) (time.Time, error) {
+	formats := []string{
+		"1/2/2006",            // Huawei format (M/D/YYYY)
+		"2/1/2006",            // Alternative format (D/M/YYYY)
+		"2006-01-02",          // ISO format
+		"Jan 2, 2006",         // Google Play format
+		"2006-01-02 15:04:05", // Huawei API format
+	}
+
+	for _, format := range formats {
+		if t, err := time.Parse(format, dateStr); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unable to parse date '%s' with known formats", dateStr)
+}
+
+// validateAppData checks that critical app fields are populated
+func validateAppData(app App, source string) error {
+	if app.title == "" {
+		return fmt.Errorf("%s: missing app title", source)
+	}
+	if app.version == "" {
+		return fmt.Errorf("%s: missing app version", source)
+	}
+	if app.bundleID == "" {
+		return fmt.Errorf("%s: missing bundle ID", source)
+	}
+	return nil
+}
+
+// retryOperation retries a function with exponential backoff
+func retryOperation(operation func() (App, error), maxRetries int, operationName string) (App, error) {
+	var lastErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			backoff := time.Duration(attempt) * time.Second
+			log.Printf("%s: retry attempt %d/%d after %v", operationName, attempt+1, maxRetries, backoff)
+			time.Sleep(backoff)
+		}
+
+		app, err := operation()
+		if err == nil {
+			if attempt > 0 {
+				log.Printf("%s: succeeded on attempt %d/%d", operationName, attempt+1, maxRetries)
+			}
+			return app, nil
+		}
+
+		if errors.Is(err, ErrAppNotFound) {
+			return App{}, err
+		}
+
+		lastErr = err
+	}
+	return App{}, fmt.Errorf("%s: failed after %d attempts: %w", operationName, maxRetries, lastErr)
+}
+
 func HuaweiAppGallery(appID string) (App, error) {
-	app, err := huaweiAppGalleryScrape(appID)
+	app, err := retryOperation(func() (App, error) {
+		return huaweiAppGalleryScrape(appID)
+	}, 3, fmt.Sprintf("HuaweiAppGallery scrape for appID %s", appID))
+
 	if err == nil {
 		return app, nil
 	}
@@ -235,36 +299,37 @@ func huaweiAppGalleryScrape(appID string) (App, error) {
 	log.Printf("Fetching Huawei AppGallery app data for appID: %s", appID)
 
 	// Create context with chromedp-undetected for anti-bot protection
-	// Automatically uses local Chrome or falls back to remote if configured
 	taskCtx, cancel, err := createBrowserContext()
 	if err != nil {
 		return App{}, fmt.Errorf("failed to create browser context: %w", err)
 	}
 	defer cancel()
 
-	chromedp.ListenTarget(taskCtx, DisableFetchExceptScripts(taskCtx, []network.ResourceType{
-		network.ResourceTypeImage,
-		network.ResourceTypeFont,
-		network.ResourceTypeMedia,
-		network.ResourceTypeManifest,
-		network.ResourceTypeOther,
-	}))
+	// Use shared resource blocking configuration
+	chromedp.ListenTarget(taskCtx, DisableFetchExceptScripts(taskCtx, commonResourceTypesToBlock))
 
 	timeoutCtx, cancel := context.WithTimeout(taskCtx, DefaultTimeout)
 	defer cancel()
 
-	xpathVersion := ` //div[contains(text(), "Version")]/following-sibling::div[1]`
-	xpathUpdated := `//div[contains(text(), "Updated")]/following-sibling::div[1]`
-	xpathDeveloper := `//div[contains(text(), "Developer")]/following-sibling::div[1]`
-
 	var notFound bool
 	var updated string
+
+	// Structure to hold all extracted data from JavaScript
+	var extractedData struct {
+		Title     string `json:"title"`
+		Version   string `json:"version"`
+		Updated   string `json:"updated"`
+		Developer string `json:"developer"`
+		BundleID  string `json:"bundleID"`
+	}
 
 	if err := chromedp.Run(timeoutCtx,
 		fetch.Enable(),
 		chromedp.Navigate(app.url),
 		chromedp.WaitVisible(`div[class="horizonhomecard"]`),
 		chromedp.WaitVisible(`div[class="componentContainer"]`),
+		// Check if app exists by examining component container height
+		// A height < 500px typically indicates an error or missing app page
 		chromedp.Evaluate(`document.querySelector('.componentContainer').offsetHeight < 500`, &notFound),
 		chromedp.ActionFunc(func(_ context.Context) error {
 			if notFound {
@@ -272,26 +337,48 @@ func huaweiAppGalleryScrape(appID string) (App, error) {
 			}
 			return nil
 		}),
-		chromedp.Text(`div.center_info > div.title`, &app.title, chromedp.NodeVisible),
-		chromedp.Text(xpathVersion, &app.version),
-		chromedp.Text(xpathUpdated, &updated),
-		chromedp.Text(xpathDeveloper, &app.developer),
-		chromedp.Evaluate(`document.querySelector('div[package]').getAttribute('package')`, &app.bundleID),
+
+		chromedp.Evaluate(`
+			(function() {
+				const getTextByXPath = (xpath) => {
+					const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+					return result.singleNodeValue?.innerText?.trim() || '';
+				};
+
+				return {
+					title: document.querySelector('div.center_info > div.title')?.innerText?.trim() || '',
+					version: getTextByXPath('//div[contains(text(), "Version")]/following-sibling::div[1]'),
+					updated: getTextByXPath('//div[contains(text(), "Updated")]/following-sibling::div[1]'),
+					developer: getTextByXPath('//div[contains(text(), "Developer")]/following-sibling::div[1]'),
+					bundleID: document.querySelector('div[package]')?.getAttribute('package') || ''
+				};
+			})()
+		`, &extractedData),
 	); err != nil {
 		switch {
 		case strings.Contains(err.Error(), "context deadline exceeded"):
-			return App{}, fmt.Errorf("%w: timeout while extracting data", ErrPageLoad)
+			return App{}, fmt.Errorf("%w: timeout while extracting data from %s", ErrPageLoad, app.url)
 		case errors.Is(err, ErrAppNotFound):
 			return App{}, ErrAppNotFound
 		default:
-			return App{}, fmt.Errorf("failed to extract app data: %w", err)
+			return App{}, fmt.Errorf("failed to extract app data from %s: %w", app.url, err)
 		}
 	}
 
-	parsedDate, err := time.Parse("1/2/2006", updated)
-	if err != nil {
-		log.Printf("Error parsing date(%s): %s \n", updated, err)
+	app.title = extractedData.Title
+	app.version = extractedData.Version
+	app.developer = extractedData.Developer
+	app.bundleID = extractedData.BundleID
+	updated = extractedData.Updated
+
+	if err := validateAppData(app, "Huawei AppGallery scrape"); err != nil {
 		return App{}, err
+	}
+
+	parsedDate, err := parseFlexibleDate(updated)
+	if err != nil {
+		log.Printf("Error parsing date '%s': %v", updated, err)
+		return App{}, fmt.Errorf("failed to parse update date: %w", err)
 	}
 
 	app.updated = parsedDate.Format("02-01-2006")
