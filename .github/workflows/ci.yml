@@ -74,7 +74,7 @@ jobs:
         run: go test -v -race -cover ./... -count=1 -coverprofile=coverage.out -covermode=atomic
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           verbose: true
         env:
