@@ -173,8 +173,9 @@ func GooglePlayStore(bundleID, lang, country string) (App, error) {
 		}),
 		// wait for the element is visible
 		chromedp.WaitVisible(`button[aria-label="See more information on About this app"], button[aria-label="See more information on About this game"]`),
-		// click the button
-		chromedp.Click(`button[aria-label="See more information on About this app"], button[aria-label="See more information on About this game"]`),
+		// click the button via JS: a mouse click at its coordinates can land on the
+		// overlapping header (e.g. the "Games" tab) and navigate away
+		chromedp.Evaluate(`document.querySelector('button[aria-label="See more information on About this app"], button[aria-label="See more information on About this game"]').click()`, nil),
 		// wait for the element is visible
 		chromedp.WaitVisible(xpath),
 		// get app title

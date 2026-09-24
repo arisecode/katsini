@@ -23,11 +23,11 @@ func TestGooglePlayStore(t *testing.T) {
 			bundleID:  "com.burakgon.dnschanger",
 			title:     "DNS Changer",
 			url:       "https://play.google.com/store/apps/details?id=com.burakgon.dnschanger&hl=en&gl=us",
-			developer: "AppAzio",
+			developer: "BGN CAPITAL",
 		},
 		{
 			bundleID:  "pro.flutters.app",
-			title:     "Codalingo: Learn Flutter",
+			title:     "Codalingo: Learn to Code",
 			url:       "https://play.google.com/store/apps/details?id=pro.flutters.app&hl=en&gl=us",
 			developer: "develooper.io",
 		},
@@ -61,8 +61,8 @@ func TestAppleAppStore(t *testing.T) {
 		{
 			appID:     "1487875612",
 			bundleID:  "com.rostamvpn",
-			title:     "RostamVPN - VPN Fast & Secure",
-			url:       "https://apps.apple.com/us/app/rostamvpn-vpn-fast-secure/id1487875612?uo=4",
+			title:     "RostamVPN - Unlimited Fast VPN",
+			url:       "https://apps.apple.com/us/app/rostamvpn-unlimited-fast-vpn/id1487875612?uo=4",
 			developer: "Rostam",
 		},
 		{
@@ -124,11 +124,11 @@ func TestHuaweiAppGallery(t *testing.T) {
 			developer: "Arslan Khalil",
 		},
 		{
-			appID:     "103001419",
-			bundleID:  "com.hht.businesscardmaker.huawei",
-			title:     "Business Card Maker",
-			url:       "https://appgallery.huawei.com/app/C103001419",
-			developer: "M/S HAWKS HEAVEN TECHNOLOGIES",
+			appID:     "103228579",
+			bundleID:  "com.scriptrepublic.checker5g",
+			title:     "5G Checker",
+			url:       "https://appgallery.huawei.com/app/C103228579",
+			developer: "ScriptRepublic",
 		},
 		{
 			appID:     "107552425",
