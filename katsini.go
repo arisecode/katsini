@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -267,7 +268,18 @@ func retryOperation(operation func() (App, error), maxRetries int, operationName
 }
 
 func HuaweiAppGallery(appID string) (App, error) {
-	app, err := retryOperation(func() (App, error) {
+	// The web API is plain HTTP (no browser), so it is fast and works from hosts
+	// where headless Chrome gets an empty page
+	app, err := huaweiAppGalleryWebAPI(appID)
+	if err == nil {
+		return app, nil
+	}
+	if errors.Is(err, ErrAppNotFound) {
+		return App{}, err
+	}
+	log.Printf("Huawei AppGallery web API failed for appID %s, falling back to scraping: %v", appID, err)
+
+	app, err = retryOperation(func() (App, error) {
 		return huaweiAppGalleryScrape(appID)
 	}, 3, fmt.Sprintf("HuaweiAppGallery scrape for appID %s", appID))
 
@@ -289,6 +301,116 @@ func HuaweiAppGallery(appID string) (App, error) {
 
 func shouldUseHuaweiAPIFallback() bool {
 	return os.Getenv("HUAWEI_CLIENT_ID") != "" && os.Getenv("HUAWEI_CLIENT_SECRET") != ""
+}
+
+const huaweiWebAPIBase = "https://web-dra.hispace.dbankcloud.com/edge"
+
+// huaweiAppGalleryWebAPI fetches app data from the JSON API behind the AppGallery website
+func huaweiAppGalleryWebAPI(appID string) (App, error) {
+	log.Printf("Fetching Huawei AppGallery app data via web API for appID: %s", appID)
+
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
+	defer cancel()
+
+	// The detail endpoint requires a short-lived interface code issued by the site
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, huaweiWebAPIBase+"/webedge/getInterfaceCode",
+		strings.NewReader(`{"params":{},"zone":"","locale":"en_US"}`))
+	if err != nil {
+		return App{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	var interfaceCode string
+	if err := doHuaweiWebRequest(req, &interfaceCode); err != nil {
+		return App{}, fmt.Errorf("failed to get interface code: %w", err)
+	}
+	if interfaceCode == "" {
+		return App{}, errors.New("empty interface code")
+	}
+
+	detailURL := fmt.Sprintf("%s/uowap/index?method=internal.getTabDetail&serviceType=20&reqPageNum=1&maxResults=25&uri=app%%7CC%s&zone=&locale=en_US",
+		huaweiWebAPIBase, url.QueryEscape(appID))
+	req, err = http.NewRequestWithContext(ctx, http.MethodGet, detailURL, http.NoBody)
+	if err != nil {
+		return App{}, err
+	}
+	req.Header.Set("Interface-Code", fmt.Sprintf("%s_%d", interfaceCode, time.Now().UnixMilli()))
+
+	var detail struct {
+		RtnCode    int    `json:"rtnCode"`
+		RtnDesc    string `json:"rtnDesc"`
+		LayoutData []struct {
+			DataList []struct {
+				Name        string `json:"name"`
+				Package     string `json:"package"`
+				VersionName string `json:"versionName"`
+				Developer   string `json:"developer"`
+				ReleaseDate string `json:"releaseDate"`
+			} `json:"dataList"`
+		} `json:"layoutData"`
+	}
+	if err := doHuaweiWebRequest(req, &detail); err != nil {
+		return App{}, fmt.Errorf("failed to get app detail: %w", err)
+	}
+	if detail.RtnCode != 0 {
+		return App{}, fmt.Errorf("huawei web api returned code %d: %s", detail.RtnCode, detail.RtnDesc)
+	}
+
+	app := App{
+		appID: appID,
+		url:   fmt.Sprintf("https://appgallery.huawei.com/app/C%s", appID),
+	}
+	var updated string
+
+	// App fields are spread across several detail cards; the card carrying
+	// versionName holds the title, and the app info card holds developer and date
+	for _, layout := range detail.LayoutData {
+		for _, item := range layout.DataList {
+			if item.VersionName != "" && app.version == "" {
+				app.title = item.Name
+				app.version = item.VersionName
+				app.bundleID = item.Package
+			}
+			if item.Developer != "" && app.developer == "" {
+				app.developer = item.Developer
+				updated = item.ReleaseDate
+			}
+		}
+	}
+
+	// Delisted or unknown apps return an empty detail page
+	if app.version == "" && app.developer == "" {
+		return App{}, ErrAppNotFound
+	}
+
+	if err := validateAppData(app, "Huawei AppGallery web API"); err != nil {
+		return App{}, err
+	}
+
+	parsedDate, err := parseFlexibleDate(updated)
+	if err != nil {
+		return App{}, fmt.Errorf("failed to parse update date: %w", err)
+	}
+	app.updated = parsedDate.Format("02-01-2006")
+
+	return app, nil
+}
+
+func doHuaweiWebRequest(req *http.Request, out any) error {
+	req.Header.Set("Origin", "https://appgallery.huawei.com")
+	req.Header.Set("Referer", "https://appgallery.huawei.com/")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("status code is not OK: %d", resp.StatusCode)
+	}
+
+	return json.NewDecoder(resp.Body).Decode(out)
 }
 
 func huaweiAppGalleryScrape(appID string) (App, error) {
@@ -492,7 +614,7 @@ func HuaweiAppGalleryByToken(appID string) (App, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("Status code is not OK: %d", resp.StatusCode)
-		return App{}, err
+		return App{}, fmt.Errorf("status code is not OK: %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
