@@ -6,6 +6,14 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// Huawei test app shared by the scraper and handler tests
+const (
+	checker5gBundleID  = "com.scriptrepublic.checker5g"
+	checker5gTitle     = "5G Checker"
+	checker5gURL       = "https://appgallery.huawei.com/app/C103228579"
+	checker5gDeveloper = "ScriptRepublic"
+)
+
 func TestGooglePlayStore(t *testing.T) {
 	testCases := []struct {
 		bundleID  string
@@ -125,10 +133,10 @@ func TestHuaweiAppGallery(t *testing.T) {
 		},
 		{
 			appID:     "103228579",
-			bundleID:  "com.scriptrepublic.checker5g",
-			title:     "5G Checker",
-			url:       "https://appgallery.huawei.com/app/C103228579",
-			developer: "ScriptRepublic",
+			bundleID:  checker5gBundleID,
+			title:     checker5gTitle,
+			url:       checker5gURL,
+			developer: checker5gDeveloper,
 		},
 		{
 			appID:     "107552425",

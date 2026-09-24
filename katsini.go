@@ -57,7 +57,7 @@ func createBrowserContext() (context.Context, context.CancelFunc, error) {
 
 	// If CHROME_HOST and CHROME_PORT are set, use remote Chrome (for backward compatibility with tests)
 	if chromeHost != "" && chromePort != "" {
-		log.Printf("Using remote Chrome at %s:%s", chromeHost, chromePort)
+		log.Printf("Using remote Chrome at %q:%q", chromeHost, chromePort) // #nosec G706 -- user input is escaped with %q
 		// Try undetected mode with remote Chrome
 		taskCtx, cancel, err := undetected.New(undetected.Config{
 			ChromePath: "ws://" + chromeHost + ":" + chromePort,
@@ -134,8 +134,9 @@ func GooglePlayStore(bundleID, lang, country string) (App, error) {
 		country = "us"
 	}
 
-	log.Printf("Fetching Google Play Store app data for bundleID: %s, lang: %s, country: %s", bundleID, lang, country)
-	app.url = fmt.Sprintf("https://play.google.com/store/apps/details?id=%s&hl=%s&gl=%s", app.bundleID, lang, country)
+	log.Printf("Fetching Google Play Store app data for bundleID: %q, lang: %q, country: %q", bundleID, lang, country) // #nosec G706 -- user input is escaped with %q
+	app.url = fmt.Sprintf("https://play.google.com/store/apps/details?id=%s&hl=%s&gl=%s",
+		url.QueryEscape(bundleID), url.QueryEscape(lang), url.QueryEscape(country))
 
 	// Create context with chromedp-undetected for anti-bot protection
 	// Automatically uses local Chrome or falls back to remote if configured
@@ -151,6 +152,7 @@ func GooglePlayStore(bundleID, lang, country string) (App, error) {
 	timeoutCtx, cancel := context.WithTimeout(taskCtx, DefaultTimeout)
 	defer cancel()
 
+	aboutButton := `button[aria-label="See more information on About this app"], button[aria-label="See more information on About this game"]`
 	xpath := `//div[contains(text(), "About this app") or contains(text(), "About this game")]`
 	xpathTitle := `//div[contains(text(), "About this app") or contains(text(), "About this game")]/preceding-sibling::h5[1]`
 	xpathVersion := ` //div[contains(text(), "Version")]/following-sibling::div[1]`
@@ -173,10 +175,10 @@ func GooglePlayStore(bundleID, lang, country string) (App, error) {
 			return nil
 		}),
 		// wait for the element is visible
-		chromedp.WaitVisible(`button[aria-label="See more information on About this app"], button[aria-label="See more information on About this game"]`),
+		chromedp.WaitVisible(aboutButton),
 		// click the button via JS: a mouse click at its coordinates can land on the
 		// overlapping header (e.g. the "Games" tab) and navigate away
-		chromedp.Evaluate(`document.querySelector('button[aria-label="See more information on About this app"], button[aria-label="See more information on About this game"]').click()`, nil),
+		chromedp.Evaluate(fmt.Sprintf(`document.querySelector(%q).click()`, aboutButton), nil),
 		// wait for the element is visible
 		chromedp.WaitVisible(xpath),
 		// get app title
@@ -227,7 +229,7 @@ func parseFlexibleDate(dateStr string) (time.Time, error) {
 }
 
 // validateAppData checks that critical app fields are populated
-func validateAppData(app App, source string) error {
+func validateAppData(app *App, source string) error {
 	if app.title == "" {
 		return fmt.Errorf("%s: missing app title", source)
 	}
@@ -246,14 +248,14 @@ func retryOperation(operation func() (App, error), maxRetries int, operationName
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if attempt > 0 {
 			backoff := time.Duration(attempt) * time.Second
-			log.Printf("%s: retry attempt %d/%d after %v", operationName, attempt+1, maxRetries, backoff)
+			log.Printf("%q: retry attempt %d/%d after %v", operationName, attempt+1, maxRetries, backoff) // #nosec G706 -- user input is escaped with %q
 			time.Sleep(backoff)
 		}
 
 		app, err := operation()
 		if err == nil {
 			if attempt > 0 {
-				log.Printf("%s: succeeded on attempt %d/%d", operationName, attempt+1, maxRetries)
+				log.Printf("%q: succeeded on attempt %d/%d", operationName, attempt+1, maxRetries) // #nosec G706 -- user input is escaped with %q
 			}
 			return app, nil
 		}
@@ -277,7 +279,7 @@ func HuaweiAppGallery(appID string) (App, error) {
 	if errors.Is(err, ErrAppNotFound) {
 		return App{}, err
 	}
-	log.Printf("Huawei AppGallery web API failed for appID %s, falling back to scraping: %v", appID, err)
+	log.Printf("Huawei AppGallery web API failed for appID %q, falling back to scraping: %v", appID, err) // #nosec G706 -- user input is escaped with %q
 
 	app, err = retryOperation(func() (App, error) {
 		return huaweiAppGalleryScrape(appID)
@@ -288,7 +290,7 @@ func HuaweiAppGallery(appID string) (App, error) {
 	}
 
 	if shouldUseHuaweiAPIFallback() {
-		log.Printf("Falling back to Huawei AppGallery API for appID %s due to scrape error: %v", appID, err)
+		log.Printf("Falling back to Huawei AppGallery API for appID %q due to scrape error: %v", appID, err) // #nosec G706 -- user input is escaped with %q
 		if fallback, apiErr := HuaweiAppGalleryByToken(appID); apiErr == nil {
 			return fallback, nil
 		} else {
@@ -313,7 +315,7 @@ func HuaweiAppGalleryByBundleID(bundleID string) (App, error) {
 // huaweiAppGalleryWebAPI fetches app data from the JSON API behind the AppGallery website.
 // uri selects the app: "app|C<appID>" or "package|<bundleID>".
 func huaweiAppGalleryWebAPI(uri string) (App, error) {
-	log.Printf("Fetching Huawei AppGallery app data via web API for uri: %s", uri)
+	log.Printf("Fetching Huawei AppGallery app data via web API for uri: %q", uri) // #nosec G706 -- user input is escaped with %q
 
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
 	defer cancel()
@@ -334,8 +336,16 @@ func huaweiAppGalleryWebAPI(uri string) (App, error) {
 		return App{}, errors.New("empty interface code")
 	}
 
-	detailURL := fmt.Sprintf("%s/uowap/index?method=internal.getTabDetail&serviceType=20&reqPageNum=1&maxResults=25&uri=%s&zone=&locale=en_US",
-		huaweiWebAPIBase, url.QueryEscape(uri))
+	params := url.Values{
+		"method":      {"internal.getTabDetail"},
+		"serviceType": {"20"},
+		"reqPageNum":  {"1"},
+		"maxResults":  {"25"},
+		"uri":         {uri},
+		"zone":        {""},
+		"locale":      {"en_US"},
+	}
+	detailURL := huaweiWebAPIBase + "/uowap/index?" + params.Encode()
 	req, err = http.NewRequestWithContext(ctx, http.MethodGet, detailURL, http.NoBody)
 	if err != nil {
 		return App{}, err
@@ -388,13 +398,13 @@ func huaweiAppGalleryWebAPI(uri string) (App, error) {
 		return App{}, ErrAppNotFound
 	}
 
-	if err := validateAppData(app, "Huawei AppGallery web API"); err != nil {
+	if err := validateAppData(&app, "Huawei AppGallery web API"); err != nil {
 		return App{}, err
 	}
 	if app.appID == "" {
-		return App{}, errors.New("Huawei AppGallery web API: missing app ID")
+		return App{}, errors.New("huawei AppGallery web API: missing app ID")
 	}
-	app.url = fmt.Sprintf("https://appgallery.huawei.com/app/C%s", app.appID)
+	app.url = "https://appgallery.huawei.com/app/C" + url.PathEscape(app.appID)
 
 	parsedDate, err := parseFlexibleDate(updated)
 	if err != nil {
@@ -425,10 +435,10 @@ func doHuaweiWebRequest(req *http.Request, out any) error {
 func huaweiAppGalleryScrape(appID string) (App, error) {
 	app := App{
 		appID: appID,
-		url:   fmt.Sprintf("https://appgallery.huawei.com/app/C%s", appID),
+		url:   "https://appgallery.huawei.com/app/C" + url.PathEscape(appID),
 	}
 
-	log.Printf("Fetching Huawei AppGallery app data for appID: %s", appID)
+	log.Printf("Fetching Huawei AppGallery app data for appID: %q", appID) // #nosec G706 -- user input is escaped with %q
 
 	// Create context with chromedp-undetected for anti-bot protection
 	taskCtx, cancel, err := createBrowserContext()
@@ -503,13 +513,13 @@ func huaweiAppGalleryScrape(appID string) (App, error) {
 	app.bundleID = extractedData.BundleID
 	updated = extractedData.Updated
 
-	if err := validateAppData(app, "Huawei AppGallery scrape"); err != nil {
+	if err := validateAppData(&app, "Huawei AppGallery scrape"); err != nil {
 		return App{}, err
 	}
 
 	parsedDate, err := parseFlexibleDate(updated)
 	if err != nil {
-		log.Printf("Error parsing date '%s': %v", updated, err)
+		log.Printf("Error parsing date %q: %v", updated, err)
 		return App{}, fmt.Errorf("failed to parse update date: %w", err)
 	}
 
@@ -526,12 +536,13 @@ func AppleAppStore(appID, bundleID, country string) (App, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
 	defer cancel()
 
-	itunesURL := fmt.Sprintf("https://itunes.apple.com/lookup?id=%s&country=%s", appID, country)
+	params := url.Values{"id": {appID}, "country": {country}}
 	if bundleID != "" {
-		itunesURL = fmt.Sprintf("https://itunes.apple.com/lookup?bundleId=%s&country=%s", bundleID, country)
+		params = url.Values{"bundleId": {bundleID}, "country": {country}}
 	}
+	itunesURL := "https://itunes.apple.com/lookup?" + params.Encode()
 
-	log.Printf("Fetching AppleAppStore app data for appID: %s", appID)
+	log.Printf("Fetching AppleAppStore app data for appID: %q, bundleID: %q", appID, bundleID) // #nosec G706 -- user input is escaped with %q
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, itunesURL, http.NoBody)
 	if err != nil {
 		return App{}, err
@@ -603,7 +614,7 @@ func HuaweiAppGalleryByToken(appID string) (App, error) {
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		fmt.Sprintf("https://connect-api.cloud.huawei.com/api/publish/v2/app-info?appId=%s", appID), http.NoBody)
+		"https://connect-api.cloud.huawei.com/api/publish/v2/app-info?"+url.Values{"appId": {appID}}.Encode(), http.NoBody)
 	if err != nil {
 		log.Printf("Failed to create request: %v", err)
 		return App{}, err
@@ -678,7 +689,7 @@ func HuaweiAppGalleryByToken(appID string) (App, error) {
 	return App{
 		appID:     appID,
 		bundleID:  bundleID,
-		url:       fmt.Sprintf("https://appgallery.huawei.com/app/C%s", appID),
+		url:       "https://appgallery.huawei.com/app/C" + url.PathEscape(appID),
 		title:     title,
 		version:   appResponse.AppInfo.VersionNumber,
 		updated:   parseDate.Format("02-01-2006"),
@@ -705,7 +716,7 @@ func getHuaweiToken() (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		"https://connect-api-dre.cloud.huawei.com/api/oauth2/v1/token", bytes.NewBuffer(jsonData))
 	if err != nil {
-		log.Printf("Faield to create request: %v", err)
+		log.Printf("Failed to create request: %v", err)
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")

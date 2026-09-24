@@ -67,6 +67,11 @@ func TestMain(m *testing.M) {
 	m.Run()
 }
 
+const (
+	testValidRequest  = "Valid request"
+	testInvalidMethod = "Invalid method"
+)
+
 func TestGooglePlayStoreHandler(t *testing.T) {
 	testCases := []struct {
 		name           string
@@ -76,17 +81,17 @@ func TestGooglePlayStoreHandler(t *testing.T) {
 		expectedBody   map[string]string
 	}{
 		{
-			name:           "Valid request",
+			name:           testValidRequest,
 			method:         http.MethodGet,
 			query:          "?bundleId=com.ninjakiwi.monkeycity&lang=en&country=US",
 			expectedStatus: http.StatusOK,
 			expectedBody: map[string]string{
-				"bundleId":  "com.ninjakiwi.monkeycity",
-				"title":     "Bloons Monkey City",
-				"url":       "https://play.google.com/store/apps/details?id=com.ninjakiwi.monkeycity&hl=en&gl=US",
-				"version":   "1.13",
-				"updated":   "13-08-2024",
-				"developer": "ninja kiwi",
+				keyBundleID:  "com.ninjakiwi.monkeycity",
+				keyTitle:     "Bloons Monkey City",
+				keyURL:       "https://play.google.com/store/apps/details?id=com.ninjakiwi.monkeycity&hl=en&gl=US",
+				keyVersion:   "1.13",
+				keyUpdated:   "13-08-2024",
+				keyDeveloper: "ninja kiwi",
 			},
 		},
 		{
@@ -95,7 +100,7 @@ func TestGooglePlayStoreHandler(t *testing.T) {
 			query:          "?lang=en&country=US",
 			expectedStatus: http.StatusBadRequest,
 			expectedBody: map[string]string{
-				"error": "Please provide an app bundleId",
+				keyError: "Please provide an app bundleId",
 			},
 		},
 		{
@@ -104,23 +109,23 @@ func TestGooglePlayStoreHandler(t *testing.T) {
 			query:          "?bundleId=invalid&lang=en&country=US",
 			expectedStatus: http.StatusBadRequest,
 			expectedBody: map[string]string{
-				"error": "app not found",
+				keyError: ErrAppNotFound.Error(),
 			},
 		},
 		{
-			name:           "Invalid method",
+			name:           testInvalidMethod,
 			method:         http.MethodPost,
 			query:          "?bundleId=com.test.app",
 			expectedStatus: http.StatusMethodNotAllowed,
 			expectedBody: map[string]string{
-				"error": "Method not allowed",
+				keyError: msgMethodNotAllowed,
 			},
 		},
 	}
 
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(tt.method, "/playstore"+tt.query, http.NoBody)
+			req := httptest.NewRequestWithContext(t.Context(), tt.method, "/playstore"+tt.query, http.NoBody)
 			rr := httptest.NewRecorder()
 
 			handler := http.HandlerFunc(handleGooglePlayStore)
@@ -140,18 +145,18 @@ func TestAppleAppStoreHandler(t *testing.T) {
 		expectedBody   map[string]string
 	}{
 		{
-			name:           "Valid request",
+			name:           testValidRequest,
 			method:         http.MethodGet,
 			query:          "?appId=1495273697&country=US",
 			expectedStatus: http.StatusOK,
 			expectedBody: map[string]string{
-				"appId":     "1495273697",
-				"bundleId":  "com.walukustudio.AlMatsurat",
-				"title":     "Al Ma'tsurat",
-				"url":       "https://apps.apple.com/us/app/al-matsurat/id1495273697?uo=4",
-				"version":   "1.03",
-				"updated":   "24-06-2026",
-				"developer": "Alfan Nasrulloh",
+				keyAppID:     "1495273697",
+				keyBundleID:  "com.walukustudio.AlMatsurat",
+				keyTitle:     "Al Ma'tsurat",
+				keyURL:       "https://apps.apple.com/us/app/al-matsurat/id1495273697?uo=4",
+				keyVersion:   "1.03",
+				keyUpdated:   "24-06-2026",
+				keyDeveloper: "Alfan Nasrulloh",
 			},
 		},
 		{
@@ -160,7 +165,7 @@ func TestAppleAppStoreHandler(t *testing.T) {
 			query:          "?country=US",
 			expectedStatus: http.StatusBadRequest,
 			expectedBody: map[string]string{
-				"error": "Please provide an app appId or bundleId",
+				keyError: "Please provide an app appId or bundleId",
 			},
 		},
 		{
@@ -169,23 +174,23 @@ func TestAppleAppStoreHandler(t *testing.T) {
 			query:          "?appId=invalid&country=US",
 			expectedStatus: http.StatusBadRequest,
 			expectedBody: map[string]string{
-				"error": "app not found",
+				keyError: ErrAppNotFound.Error(),
 			},
 		},
 		{
-			name:           "Invalid method",
+			name:           testInvalidMethod,
 			method:         http.MethodPost,
 			query:          "?appId=com.test.app",
 			expectedStatus: http.StatusMethodNotAllowed,
 			expectedBody: map[string]string{
-				"error": "Method not allowed",
+				keyError: msgMethodNotAllowed,
 			},
 		},
 	}
 
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(tt.method, "/appstore"+tt.query, http.NoBody)
+			req := httptest.NewRequestWithContext(t.Context(), tt.method, "/appstore"+tt.query, http.NoBody)
 			rr := httptest.NewRecorder()
 
 			handler := http.HandlerFunc(handleAppleAppStore)
@@ -205,18 +210,18 @@ func TestHuaweiAppGalleryHandler(t *testing.T) {
 		expectedBody   map[string]string
 	}{
 		{
-			name:           "Valid request",
+			name:           testValidRequest,
 			method:         http.MethodGet,
 			query:          "?appId=103228579",
 			expectedStatus: http.StatusOK,
 			expectedBody: map[string]string{
-				"appId":     "103228579",
-				"bundleId":  "com.scriptrepublic.checker5g",
-				"title":     "5G Checker",
-				"url":       "https://appgallery.huawei.com/app/C103228579",
-				"version":   "1.0",
-				"updated":   "09-11-2020",
-				"developer": "ScriptRepublic",
+				keyAppID:     "103228579",
+				keyBundleID:  checker5gBundleID,
+				keyTitle:     checker5gTitle,
+				keyURL:       checker5gURL,
+				keyVersion:   "1.0",
+				keyUpdated:   "09-11-2020",
+				keyDeveloper: checker5gDeveloper,
 			},
 		},
 		{
@@ -225,13 +230,13 @@ func TestHuaweiAppGalleryHandler(t *testing.T) {
 			query:          "?bundleId=com.scriptrepublic.checker5g",
 			expectedStatus: http.StatusOK,
 			expectedBody: map[string]string{
-				"appId":     "103228579",
-				"bundleId":  "com.scriptrepublic.checker5g",
-				"title":     "5G Checker",
-				"url":       "https://appgallery.huawei.com/app/C103228579",
-				"version":   "1.0",
-				"updated":   "09-11-2020",
-				"developer": "ScriptRepublic",
+				keyAppID:     "103228579",
+				keyBundleID:  checker5gBundleID,
+				keyTitle:     checker5gTitle,
+				keyURL:       checker5gURL,
+				keyVersion:   "1.0",
+				keyUpdated:   "09-11-2020",
+				keyDeveloper: checker5gDeveloper,
 			},
 		},
 		{
@@ -240,7 +245,7 @@ func TestHuaweiAppGalleryHandler(t *testing.T) {
 			query:          "",
 			expectedStatus: http.StatusBadRequest,
 			expectedBody: map[string]string{
-				"error": "Please provide an app appId or bundleId",
+				keyError: "Please provide an app appId or bundleId",
 			},
 		},
 		{
@@ -249,7 +254,7 @@ func TestHuaweiAppGalleryHandler(t *testing.T) {
 			query:          "?bundleId=com.does.not.exist12345",
 			expectedStatus: http.StatusBadRequest,
 			expectedBody: map[string]string{
-				"error": "app not found",
+				keyError: ErrAppNotFound.Error(),
 			},
 		},
 		{
@@ -258,23 +263,23 @@ func TestHuaweiAppGalleryHandler(t *testing.T) {
 			query:          "?appId=invalid",
 			expectedStatus: http.StatusBadRequest,
 			expectedBody: map[string]string{
-				"error": "app not found",
+				keyError: ErrAppNotFound.Error(),
 			},
 		},
 		{
-			name:           "Invalid method",
+			name:           testInvalidMethod,
 			method:         http.MethodPost,
 			query:          "?appId=1234562123",
 			expectedStatus: http.StatusMethodNotAllowed,
 			expectedBody: map[string]string{
-				"error": "Method not allowed",
+				keyError: msgMethodNotAllowed,
 			},
 		},
 	}
 
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(tt.method, "/huawei"+tt.query, http.NoBody)
+			req := httptest.NewRequestWithContext(t.Context(), tt.method, "/huawei"+tt.query, http.NoBody)
 			rr := httptest.NewRecorder()
 
 			handler := http.HandlerFunc(handleHuaweiAppGallery)
