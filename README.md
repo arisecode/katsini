@@ -94,7 +94,8 @@ curl http://localhost:8080/appstore?appId=1592213654&country=us
 - **URL:** `http://localhost:8080/appgallery`
 - **Method:** `GET`
 - **Query Parameter:**
-    - `appId` (**REQUIRED**): The unique identifier for the application in the Huawei AppGallery. This can be found in the app's store URL after the `/app/C<APP_ID>` segment.
+    - `appId` (**REQUIRED** if `bundleId` is not provided): The unique identifier for the application in the Huawei AppGallery. This can be found in the app's store URL after the `/app/C<APP_ID>` segment.
+    - `bundleId` (**REQUIRED** if `appId` is not provided): The app package name (e.g., `com.radio.fmradio`). If both are provided, `appId` is used.
 
 **⚠️ Important for VPS/Datacenter Deployments:**
 
@@ -114,6 +115,8 @@ Huawei AppGallery actively blocks requests from datacenter/VPS IP addresses, ret
 The application will automatically fallback to the official Huawei API when scraping fails, bypassing IP restrictions.
 ```bash
 curl http://localhost:8080/appgallery?appId=100102149
+# or by package name
+curl http://localhost:8080/appgallery?bundleId=com.radio.fmradio
 ```
 #### Example Response:
 ```json

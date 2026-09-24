@@ -220,12 +220,36 @@ func TestHuaweiAppGalleryHandler(t *testing.T) {
 			},
 		},
 		{
+			name:           "Valid bundleId request",
+			method:         http.MethodGet,
+			query:          "?bundleId=com.scriptrepublic.checker5g",
+			expectedStatus: http.StatusOK,
+			expectedBody: map[string]string{
+				"appId":     "103228579",
+				"bundleId":  "com.scriptrepublic.checker5g",
+				"title":     "5G Checker",
+				"url":       "https://appgallery.huawei.com/app/C103228579",
+				"version":   "1.0",
+				"updated":   "09-11-2020",
+				"developer": "ScriptRepublic",
+			},
+		},
+		{
 			name:           "Missing appId",
 			method:         http.MethodGet,
 			query:          "",
 			expectedStatus: http.StatusBadRequest,
 			expectedBody: map[string]string{
-				"error": "Please provide an app appId",
+				"error": "Please provide an app appId or bundleId",
+			},
+		},
+		{
+			name:           "Invalid bundleId",
+			method:         http.MethodGet,
+			query:          "?bundleId=com.does.not.exist12345",
+			expectedStatus: http.StatusBadRequest,
+			expectedBody: map[string]string{
+				"error": "app not found",
 			},
 		},
 		{

@@ -118,13 +118,22 @@ func handleHuaweiAppGallery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	appID := r.URL.Query().Get("appId")
-	if appID == "" {
-		writeError(w, http.StatusBadRequest, "Please provide an app appId")
+	query := r.URL.Query()
+	appID := query.Get("appId")
+	bundleID := query.Get("bundleId")
+
+	if appID == "" && bundleID == "" {
+		writeError(w, http.StatusBadRequest, "Please provide an app appId or bundleId")
 		return
 	}
 
-	app, err := HuaweiAppGallery(appID)
+	var app App
+	var err error
+	if appID != "" {
+		app, err = HuaweiAppGallery(appID)
+	} else {
+		app, err = HuaweiAppGalleryByBundleID(bundleID)
+	}
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

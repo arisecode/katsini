@@ -270,7 +270,7 @@ func retryOperation(operation func() (App, error), maxRetries int, operationName
 func HuaweiAppGallery(appID string) (App, error) {
 	// The web API is plain HTTP (no browser), so it is fast and works from hosts
 	// where headless Chrome gets an empty page
-	app, err := huaweiAppGalleryWebAPI(appID)
+	app, err := huaweiAppGalleryWebAPI("app|C" + appID)
 	if err == nil {
 		return app, nil
 	}
@@ -305,9 +305,15 @@ func shouldUseHuaweiAPIFallback() bool {
 
 const huaweiWebAPIBase = "https://web-dra.hispace.dbankcloud.com/edge"
 
-// huaweiAppGalleryWebAPI fetches app data from the JSON API behind the AppGallery website
-func huaweiAppGalleryWebAPI(appID string) (App, error) {
-	log.Printf("Fetching Huawei AppGallery app data via web API for appID: %s", appID)
+// HuaweiAppGalleryByBundleID looks up an app by its package name (e.g. com.example.app)
+func HuaweiAppGalleryByBundleID(bundleID string) (App, error) {
+	return huaweiAppGalleryWebAPI("package|" + bundleID)
+}
+
+// huaweiAppGalleryWebAPI fetches app data from the JSON API behind the AppGallery website.
+// uri selects the app: "app|C<appID>" or "package|<bundleID>".
+func huaweiAppGalleryWebAPI(uri string) (App, error) {
+	log.Printf("Fetching Huawei AppGallery app data via web API for uri: %s", uri)
 
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
 	defer cancel()
@@ -328,8 +334,8 @@ func huaweiAppGalleryWebAPI(appID string) (App, error) {
 		return App{}, errors.New("empty interface code")
 	}
 
-	detailURL := fmt.Sprintf("%s/uowap/index?method=internal.getTabDetail&serviceType=20&reqPageNum=1&maxResults=25&uri=app%%7CC%s&zone=&locale=en_US",
-		huaweiWebAPIBase, url.QueryEscape(appID))
+	detailURL := fmt.Sprintf("%s/uowap/index?method=internal.getTabDetail&serviceType=20&reqPageNum=1&maxResults=25&uri=%s&zone=&locale=en_US",
+		huaweiWebAPIBase, url.QueryEscape(uri))
 	req, err = http.NewRequestWithContext(ctx, http.MethodGet, detailURL, http.NoBody)
 	if err != nil {
 		return App{}, err
@@ -343,6 +349,7 @@ func huaweiAppGalleryWebAPI(appID string) (App, error) {
 			DataList []struct {
 				Name        string `json:"name"`
 				Package     string `json:"package"`
+				AppID       string `json:"appid"`
 				VersionName string `json:"versionName"`
 				Developer   string `json:"developer"`
 				ReleaseDate string `json:"releaseDate"`
@@ -356,10 +363,7 @@ func huaweiAppGalleryWebAPI(appID string) (App, error) {
 		return App{}, fmt.Errorf("huawei web api returned code %d: %s", detail.RtnCode, detail.RtnDesc)
 	}
 
-	app := App{
-		appID: appID,
-		url:   fmt.Sprintf("https://appgallery.huawei.com/app/C%s", appID),
-	}
+	var app App
 	var updated string
 
 	// App fields are spread across several detail cards; the card carrying
@@ -370,6 +374,7 @@ func huaweiAppGalleryWebAPI(appID string) (App, error) {
 				app.title = item.Name
 				app.version = item.VersionName
 				app.bundleID = item.Package
+				app.appID = strings.TrimPrefix(item.AppID, "C")
 			}
 			if item.Developer != "" && app.developer == "" {
 				app.developer = item.Developer
@@ -386,6 +391,10 @@ func huaweiAppGalleryWebAPI(appID string) (App, error) {
 	if err := validateAppData(app, "Huawei AppGallery web API"); err != nil {
 		return App{}, err
 	}
+	if app.appID == "" {
+		return App{}, errors.New("Huawei AppGallery web API: missing app ID")
+	}
+	app.url = fmt.Sprintf("https://appgallery.huawei.com/app/C%s", app.appID)
 
 	parsedDate, err := parseFlexibleDate(updated)
 	if err != nil {
