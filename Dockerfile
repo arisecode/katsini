@@ -1,7 +1,7 @@
 FROM golang:1.27-alpine AS build
 
-# Install build dependencies and UPX
-RUN apk add --no-cache curl upx
+# Install build dependencies, UPX and the CA bundle copied into the final image
+RUN apk add --no-cache curl upx ca-certificates
 
 WORKDIR /app
 
@@ -17,22 +17,16 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -tags osusergo,netgo -o server -
 # Compress the binary with UPX
 RUN upx --best --lzma /app/server
 
-# Final Alpine-based stage
-FROM alpine:latest
+# Final stage: the static binary plus the CA bundle it needs for HTTPS, nothing else
+FROM scratch
 
-# Install Chromium and required packages
-RUN apk add --no-cache \
-    chromium \
-    chromium-chromedriver \
-    ca-certificates \
-    xvfb \
-    xauth \
-    font-noto-emoji \
-    ttf-freefont \
-    && rm -rf /var/cache/apk/*
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
 # Copy the compressed application binary
 COPY --from=build /app/server /server
+
+# Run as nobody; no passwd file is needed since the app never looks up users
+USER 65534:65534
 
 EXPOSE 8080
 

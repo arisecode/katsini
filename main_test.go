@@ -1,71 +1,11 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
-	"log"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
-
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
 )
-
-func TestMain(m *testing.M) {
-	ctx := context.Background()
-
-	// Create Chrome container for testing
-	req := testcontainers.ContainerRequest{
-		Image:        "chromedp/headless-shell:136.0.7052.2",
-		ExposedPorts: []string{"9222/tcp"},
-		WaitingFor: wait.ForAll(
-			wait.NewHTTPStrategy("/json/version").WithPort("9222/tcp").WithStatusCodeMatcher(func(status int) bool {
-				return status == 200
-			}),
-		),
-		Cmd: []string{
-			"--no-sandbox",
-			"--disable-gpu",
-			"--remote-debugging-address=0.0.0.0",
-			"--remote-debugging-port=9222",
-			"--disable-extensions",
-			"--enable-automation",
-			"--disable-blink-features=AutomationControlled",
-			"--incognito",
-		},
-	}
-
-	chromeContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: req,
-		Started:          true,
-	})
-	if err != nil {
-		log.Panicf("Failed to start Chrome container: %v", err)
-	}
-
-	defer func() {
-		if err := chromeContainer.Terminate(ctx); err != nil {
-			log.Panicf("Failed to terminate Chrome container: %v", err)
-		}
-	}()
-
-	host, err := chromeContainer.Host(ctx)
-	if err != nil {
-		log.Panicf("Failed to get Chrome host: %v", err)
-	}
-
-	port, err := chromeContainer.MappedPort(ctx, "9222/tcp")
-	if err != nil {
-		log.Panicf("Failed to get Chrome port: %v", err)
-	}
-
-	_ = os.Setenv("CHROME_HOST", host)
-	_ = os.Setenv("CHROME_PORT", port.Port())
-
-	m.Run()
-}
 
 const (
 	testValidRequest  = "Valid request"

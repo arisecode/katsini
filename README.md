@@ -29,7 +29,7 @@
 
 ## 🐳 Quick Start
 
-Katsini comes with Chrome bundled in the container - no separate services or configuration needed!
+Katsini ships as a single ~4MB container - no browser, separate services or configuration needed!
 
 ```bash
 docker run -p 8080:8080 ghcr.io/arisecode/katsini:latest
@@ -37,7 +37,6 @@ docker run -p 8080:8080 ghcr.io/arisecode/katsini:latest
 
 🎉 That's it! You can now access the service at `http://localhost:8080`
 
-**Note:** Chrome is automatically bundled with anti-bot protection. Just run the single container and you're ready to go!
 
 ## 📖 Usage
 
@@ -99,7 +98,7 @@ curl http://localhost:8080/appstore?appId=1592213654&country=us
 
 **⚠️ Important for VPS/Datacenter Deployments:**
 
-Huawei AppGallery actively blocks requests from datacenter/VPS IP addresses, returning empty pages even though the app exists. If you're deploying on a VPS (AWS, DigitalOcean, Vultr, etc.) and experiencing issues where apps return empty results or "app not found" errors, you **must** configure the API fallback:
+Huawei AppGallery actively blocks requests from datacenter/VPS IP addresses, failing requests even though the app exists. If you're deploying on a VPS (AWS, DigitalOcean, Vultr, etc.) and experiencing issues where apps return empty results or "app not found" errors, you **must** configure the API fallback:
 
 1. Register at [Huawei Developer Console](https://developer.huawei.com/consumer/en/console)
 2. Create an app/project and enable AppGallery Publishing API
@@ -112,7 +111,7 @@ Huawei AppGallery actively blocks requests from datacenter/VPS IP addresses, ret
      ghcr.io/arisecode/katsini:latest
    ```
 
-The application will automatically fallback to the official Huawei API when scraping fails, bypassing IP restrictions.
+The application will automatically fallback to the official Huawei API when the web API fails, bypassing IP restrictions.
 ```bash
 curl http://localhost:8080/appgallery?appId=100102149
 # or by package name
@@ -153,19 +152,9 @@ The benchmark results show the average time taken and how many iterations were r
 - `B/op` : The average number of bytes allocated per operation.
 - `allocs/op` : The average number of memory allocations per operation.
 
-## 🔒 Anti-Bot Protection
+## ⚙️ How It Works
 
-Katsini uses [chromedp-undetected](https://github.com/Davincible/chromedp-undetected) to bypass basic anti-bot detection mechanisms. This helps ensure reliable data fetching from app stores that implement bot protection.
-
-**Features:**
-- 🛡️ Automatic stealth mode when available
-- 🔄 Graceful fallback to regular chromedp on unsupported platforms
-- 🤖 Mimics real browser behavior to avoid detection
-- ⚡ No performance impact on regular operations
-
-**Note:** The undetected mode works best in Linux environments with headless Chrome. On macOS and other platforms, it automatically falls back to standard chromedp mode.
-
-## 🔋 Uses
-Here are some of the libraries that are used in this project:
-- [Chromedp](https://github.com/chromedp/chromedp) - A faster, simpler way to drive browsers in Go.
-- [chromedp-undetected](https://github.com/Davincible/chromedp-undetected) - Anti-bot detection bypass for chromedp.
+Katsini fetches every store over plain HTTP - no headless browser:
+- **Google Play Store**: reads the app details from the JSON embedded in the app page.
+- **Apple App Store**: uses the iTunes Lookup API.
+- **Huawei AppGallery**: uses the JSON API behind the AppGallery website, falling back to the AppGallery Connect API when `HUAWEI_CLIENT_ID` and `HUAWEI_CLIENT_SECRET` are set.

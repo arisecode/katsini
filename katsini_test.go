@@ -1,12 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
-// Huawei test app shared by the scraper and handler tests
+// Huawei test app shared by the katsini and handler tests
 const (
 	checker5gBundleID  = "com.scriptrepublic.checker5g"
 	checker5gTitle     = "5G Checker"
@@ -56,6 +57,40 @@ func TestGooglePlayStore(t *testing.T) {
 			assert.Equal(t, tc.developer, app.developer)
 		})
 	}
+}
+
+func TestParsePlayStorePage(t *testing.T) {
+	// details sits at data[1][2]; build it with the indexes Play uses
+	details := make([]any, 146)
+	details[0] = []any{"Beyondium"}
+	details[68] = []any{"Mediocre"}
+	details[140] = []any{[]any{[]any{"1.1.5"}}}
+	details[145] = []any{[]any{"Oct 31, 2019", []any{1572533883, 121000000}}}
+	data, err := json.Marshal([]any{nil, []any{nil, nil, details}})
+	assert.NoError(t, err)
+
+	page := "<script>AF_initDataCallback({key: 'ds:0', hash: '1', data:[1,2], sideChannel: {}});</script>" +
+		"<script>AF_initDataCallback({key: 'ds:5', hash: '2', data:" + string(data) + ", sideChannel: {}});</script>"
+
+	var app App
+	assert.NoError(t, parsePlayStorePage([]byte(page), &app))
+	assert.Equal(t, "Beyondium", app.title)
+	assert.Equal(t, "Mediocre", app.developer)
+	assert.Equal(t, "1.1.5", app.version)
+	assert.Equal(t, "31-10-2019", app.updated)
+
+	assert.Error(t, parsePlayStorePage([]byte("<html></html>"), &App{}))
+
+	details[145] = nil
+	data, err = json.Marshal([]any{nil, []any{nil, nil, details}})
+	assert.NoError(t, err)
+	page = "<script>AF_initDataCallback({key: 'ds:5', hash: '2', data:" + string(data) + ", sideChannel: {}});</script>"
+	assert.ErrorIs(t, parsePlayStorePage([]byte(page), &App{}), ErrAppNotFound)
+}
+
+func TestGooglePlayStoreNotFound(t *testing.T) {
+	_, err := GooglePlayStore("com.katsini.does.not.exist", "en", "us")
+	assert.ErrorIs(t, err, ErrAppNotFound)
 }
 
 func TestAppleAppStore(t *testing.T) {
