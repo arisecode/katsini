@@ -38,7 +38,10 @@ var (
 	ErrPageLoad    = errors.New("failed to load page")
 )
 
-const DefaultTimeout = 30 * time.Second
+const (
+	DefaultTimeout     = 30 * time.Second
+	chromeStartTimeout = 60 * time.Second
+)
 
 // Common resource types to block for faster page loading
 var commonResourceTypesToBlock = []network.ResourceType{
@@ -49,45 +52,33 @@ var commonResourceTypesToBlock = []network.ResourceType{
 	network.ResourceTypeOther,
 }
 
-// createBrowserContext creates a browser context with anti-bot protection
-// It automatically detects whether to use local Chrome or remote Chrome based on environment variables
+// createBrowserContext creates a browser context with anti-bot protection.
+// chromedp-undetected always launches a local Chrome (it only supports headless on Linux);
+// when that fails and CHROME_HOST/CHROME_PORT are set, it falls back to that remote Chrome.
 func createBrowserContext() (context.Context, context.CancelFunc, error) {
-	chromeHost := os.Getenv("CHROME_HOST")
-	chromePort := os.Getenv("CHROME_PORT")
-
-	// If CHROME_HOST and CHROME_PORT are set, use remote Chrome (for backward compatibility with tests)
-	if chromeHost != "" && chromePort != "" {
-		log.Printf("Using remote Chrome at %q:%q", chromeHost, chromePort) // #nosec G706 -- user input is escaped with %q
-		// Try undetected mode with remote Chrome
-		taskCtx, cancel, err := undetected.New(undetected.Config{
-			ChromePath: "ws://" + chromeHost + ":" + chromePort,
-			Headless:   true,
-			NoSandbox:  true,
-		})
-		if err != nil {
-			log.Printf("Undetected mode not available, falling back to regular chromedp: %v", err)
-			// Fallback to regular chromedp
-			allocCtx, allocCancel := chromedp.NewRemoteAllocator(context.Background(), fmt.Sprintf("ws://%s:%s/json", chromeHost, chromePort))
-			taskCtx, cancel = chromedp.NewContext(allocCtx)
-			// Return a combined cancel function
-			return taskCtx, func() {
-				cancel()
-				allocCancel()
-			}, nil
-		}
-		return taskCtx, cancel, nil
-	}
-
-	// Use local Chrome with chromedp-undetected
-	log.Printf("Using local Chrome with chromedp-undetected")
 	taskCtx, cancel, err := undetected.New(undetected.Config{
 		Headless:  true,
 		NoSandbox: true,
+		// a cold Chrome start (e.g. on a fresh CI runner) can exceed chromedp's 20s default
+		ChromeFlags: []chromedp.ExecAllocatorOption{chromedp.WSURLReadTimeout(chromeStartTimeout)},
 	})
-	if err != nil {
+	if err == nil {
+		return taskCtx, cancel, nil
+	}
+
+	chromeHost := os.Getenv("CHROME_HOST")
+	chromePort := os.Getenv("CHROME_PORT")
+	if chromeHost == "" || chromePort == "" {
 		return nil, nil, fmt.Errorf("failed to create undetected context: %w", err)
 	}
-	return taskCtx, cancel, nil
+
+	log.Printf("Undetected mode not available (%v), using remote Chrome at %q:%q", err, chromeHost, chromePort) // #nosec G706 -- user input is escaped with %q
+	allocCtx, allocCancel := chromedp.NewRemoteAllocator(context.Background(), fmt.Sprintf("ws://%s:%s/json", chromeHost, chromePort))
+	taskCtx, cancel = chromedp.NewContext(allocCtx)
+	return taskCtx, func() {
+		cancel()
+		allocCancel()
+	}, nil
 }
 
 func DisableFetchExceptScripts(ctx context.Context, resourceTypesToBlock []network.ResourceType) func(event any) {
@@ -139,7 +130,6 @@ func GooglePlayStore(bundleID, lang, country string) (App, error) {
 		url.QueryEscape(bundleID), url.QueryEscape(lang), url.QueryEscape(country))
 
 	// Create context with chromedp-undetected for anti-bot protection
-	// Automatically uses local Chrome or falls back to remote if configured
 	taskCtx, cancel, err := createBrowserContext()
 	if err != nil {
 		return App{}, fmt.Errorf("failed to create browser context: %w", err)
