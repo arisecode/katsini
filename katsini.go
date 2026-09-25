@@ -48,7 +48,7 @@ func GooglePlayStore(bundleID, lang, country string) (App, error) {
 
 	log.Printf("Fetching Google Play Store app data for bundleID: %q, lang: %q, country: %q", bundleID, lang, country) // #nosec G706 -- user input is escaped with %q
 	// built by hand rather than with url.Values.Encode, which sorts keys and would change the returned url
-	app.url = "https://play.google.com/store/apps/details?id=" + url.QueryEscape(bundleID) +
+	app.url = playStoreBaseURL + "/store/apps/details?id=" + url.QueryEscape(bundleID) +
 		"&hl=" + url.QueryEscape(lang) + "&gl=" + url.QueryEscape(country)
 
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
@@ -93,6 +93,9 @@ const (
 	playStoreVersionIdx   = 140
 	playStoreUpdatedIdx   = 145
 )
+
+// playStoreBaseURL is a variable so tests can point it at a local server
+var playStoreBaseURL = "https://play.google.com"
 
 const (
 	playStoreUserAgent   = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"

@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -80,12 +82,73 @@ func TestParsePlayStorePage(t *testing.T) {
 	assert.Equal(t, "31-10-2019", app.updated)
 
 	assert.Error(t, parsePlayStorePage([]byte("<html></html>"), &App{}))
+	assert.Error(t, parsePlayStorePage([]byte("<script>AF_initDataCallback({key: 'ds:1', hash: '1'});</script>"), &App{}))
 
 	details[145] = nil
 	data, err = json.Marshal([]any{nil, []any{nil, nil, details}})
 	assert.NoError(t, err)
 	page = "<script>AF_initDataCallback({key: 'ds:5', hash: '2', data:" + string(data) + ", sideChannel: {}});</script>"
 	assert.ErrorIs(t, parsePlayStorePage([]byte(page), &App{}), ErrAppNotFound)
+
+	// blocks with broken JSON are skipped, and a missing version falls back
+	details[140] = nil
+	details[145] = []any{[]any{"Oct 31, 2019", []any{1572533883, 121000000}}}
+	data, err = json.Marshal([]any{nil, []any{nil, nil, details}})
+	assert.NoError(t, err)
+	page = "<script>AF_initDataCallback({key: 'ds:2', hash: '1', data:[1,, sideChannel: {}});</script>" +
+		"<script>AF_initDataCallback({key: 'ds:5', hash: '2', data:" + string(data) + ", sideChannel: {}});</script>"
+	app = App{}
+	assert.NoError(t, parsePlayStorePage([]byte(page), &app))
+	assert.Equal(t, "Varies with device", app.version)
+}
+
+func TestGooglePlayStoreHTTPErrors(t *testing.T) {
+	testCases := []struct {
+		name    string
+		handler http.HandlerFunc
+	}{
+		{
+			name: "server error",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusInternalServerError)
+			},
+		},
+		{
+			name: "truncated body",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				// promise more bytes than are sent so reading the body fails
+				w.Header().Set("Content-Length", "100")
+				_, _ = w.Write([]byte("partial"))
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(tc.handler)
+			defer server.Close()
+			setPlayStoreBaseURL(t, server.URL)
+
+			_, err := GooglePlayStore("com.example.app", "en", "us")
+			assert.ErrorIs(t, err, ErrPageLoad)
+		})
+	}
+
+	t.Run("connection refused", func(t *testing.T) {
+		server := httptest.NewServer(http.NotFoundHandler())
+		server.Close()
+		setPlayStoreBaseURL(t, server.URL)
+
+		_, err := GooglePlayStore("com.example.app", "en", "us")
+		assert.ErrorIs(t, err, ErrPageLoad)
+	})
+}
+
+func setPlayStoreBaseURL(t *testing.T, baseURL string) {
+	t.Helper()
+	original := playStoreBaseURL
+	playStoreBaseURL = baseURL
+	t.Cleanup(func() { playStoreBaseURL = original })
 }
 
 func TestGooglePlayStoreNotFound(t *testing.T) {
