@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -37,7 +38,10 @@ var (
 	ErrPageLoad    = errors.New("failed to load page")
 )
 
-const DefaultTimeout = 30 * time.Second
+const (
+	DefaultTimeout     = 30 * time.Second
+	chromeStartTimeout = 60 * time.Second
+)
 
 // Common resource types to block for faster page loading
 var commonResourceTypesToBlock = []network.ResourceType{
@@ -48,45 +52,33 @@ var commonResourceTypesToBlock = []network.ResourceType{
 	network.ResourceTypeOther,
 }
 
-// createBrowserContext creates a browser context with anti-bot protection
-// It automatically detects whether to use local Chrome or remote Chrome based on environment variables
+// createBrowserContext creates a browser context with anti-bot protection.
+// chromedp-undetected always launches a local Chrome (it only supports headless on Linux);
+// when that fails and CHROME_HOST/CHROME_PORT are set, it falls back to that remote Chrome.
 func createBrowserContext() (context.Context, context.CancelFunc, error) {
-	chromeHost := os.Getenv("CHROME_HOST")
-	chromePort := os.Getenv("CHROME_PORT")
-
-	// If CHROME_HOST and CHROME_PORT are set, use remote Chrome (for backward compatibility with tests)
-	if chromeHost != "" && chromePort != "" {
-		log.Printf("Using remote Chrome at %s:%s", chromeHost, chromePort)
-		// Try undetected mode with remote Chrome
-		taskCtx, cancel, err := undetected.New(undetected.Config{
-			ChromePath: "ws://" + chromeHost + ":" + chromePort,
-			Headless:   true,
-			NoSandbox:  true,
-		})
-		if err != nil {
-			log.Printf("Undetected mode not available, falling back to regular chromedp: %v", err)
-			// Fallback to regular chromedp
-			allocCtx, allocCancel := chromedp.NewRemoteAllocator(context.Background(), fmt.Sprintf("ws://%s:%s/json", chromeHost, chromePort))
-			taskCtx, cancel = chromedp.NewContext(allocCtx)
-			// Return a combined cancel function
-			return taskCtx, func() {
-				cancel()
-				allocCancel()
-			}, nil
-		}
-		return taskCtx, cancel, nil
-	}
-
-	// Use local Chrome with chromedp-undetected
-	log.Printf("Using local Chrome with chromedp-undetected")
 	taskCtx, cancel, err := undetected.New(undetected.Config{
 		Headless:  true,
 		NoSandbox: true,
+		// a cold Chrome start (e.g. on a fresh CI runner) can exceed chromedp's 20s default
+		ChromeFlags: []chromedp.ExecAllocatorOption{chromedp.WSURLReadTimeout(chromeStartTimeout)},
 	})
-	if err != nil {
+	if err == nil {
+		return taskCtx, cancel, nil
+	}
+
+	chromeHost := os.Getenv("CHROME_HOST")
+	chromePort := os.Getenv("CHROME_PORT")
+	if chromeHost == "" || chromePort == "" {
 		return nil, nil, fmt.Errorf("failed to create undetected context: %w", err)
 	}
-	return taskCtx, cancel, nil
+
+	log.Printf("Undetected mode not available (%v), using remote Chrome at %q:%q", err, chromeHost, chromePort) // #nosec G706 -- user input is escaped with %q
+	allocCtx, allocCancel := chromedp.NewRemoteAllocator(context.Background(), fmt.Sprintf("ws://%s:%s/json", chromeHost, chromePort))
+	taskCtx, cancel = chromedp.NewContext(allocCtx)
+	return taskCtx, func() {
+		cancel()
+		allocCancel()
+	}, nil
 }
 
 func DisableFetchExceptScripts(ctx context.Context, resourceTypesToBlock []network.ResourceType) func(event any) {
@@ -133,11 +125,11 @@ func GooglePlayStore(bundleID, lang, country string) (App, error) {
 		country = "us"
 	}
 
-	log.Printf("Fetching Google Play Store app data for bundleID: %s, lang: %s, country: %s", bundleID, lang, country)
-	app.url = fmt.Sprintf("https://play.google.com/store/apps/details?id=%s&hl=%s&gl=%s", app.bundleID, lang, country)
+	log.Printf("Fetching Google Play Store app data for bundleID: %q, lang: %q, country: %q", bundleID, lang, country) // #nosec G706 -- user input is escaped with %q
+	app.url = fmt.Sprintf("https://play.google.com/store/apps/details?id=%s&hl=%s&gl=%s",
+		url.QueryEscape(bundleID), url.QueryEscape(lang), url.QueryEscape(country))
 
 	// Create context with chromedp-undetected for anti-bot protection
-	// Automatically uses local Chrome or falls back to remote if configured
 	taskCtx, cancel, err := createBrowserContext()
 	if err != nil {
 		return App{}, fmt.Errorf("failed to create browser context: %w", err)
@@ -150,6 +142,7 @@ func GooglePlayStore(bundleID, lang, country string) (App, error) {
 	timeoutCtx, cancel := context.WithTimeout(taskCtx, DefaultTimeout)
 	defer cancel()
 
+	aboutButton := `button[aria-label="See more information on About this app"], button[aria-label="See more information on About this game"]`
 	xpath := `//div[contains(text(), "About this app") or contains(text(), "About this game")]`
 	xpathTitle := `//div[contains(text(), "About this app") or contains(text(), "About this game")]/preceding-sibling::h5[1]`
 	xpathVersion := ` //div[contains(text(), "Version")]/following-sibling::div[1]`
@@ -172,10 +165,10 @@ func GooglePlayStore(bundleID, lang, country string) (App, error) {
 			return nil
 		}),
 		// wait for the element is visible
-		chromedp.WaitVisible(`button[aria-label="See more information on About this app"], button[aria-label="See more information on About this game"]`),
+		chromedp.WaitVisible(aboutButton),
 		// click the button via JS: a mouse click at its coordinates can land on the
 		// overlapping header (e.g. the "Games" tab) and navigate away
-		chromedp.Evaluate(`document.querySelector('button[aria-label="See more information on About this app"], button[aria-label="See more information on About this game"]').click()`, nil),
+		chromedp.Evaluate(fmt.Sprintf(`document.querySelector(%q).click()`, aboutButton), nil),
 		// wait for the element is visible
 		chromedp.WaitVisible(xpath),
 		// get app title
@@ -226,7 +219,7 @@ func parseFlexibleDate(dateStr string) (time.Time, error) {
 }
 
 // validateAppData checks that critical app fields are populated
-func validateAppData(app App, source string) error {
+func validateAppData(app *App, source string) error {
 	if app.title == "" {
 		return fmt.Errorf("%s: missing app title", source)
 	}
@@ -245,14 +238,14 @@ func retryOperation(operation func() (App, error), maxRetries int, operationName
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if attempt > 0 {
 			backoff := time.Duration(attempt) * time.Second
-			log.Printf("%s: retry attempt %d/%d after %v", operationName, attempt+1, maxRetries, backoff)
+			log.Printf("%q: retry attempt %d/%d after %v", operationName, attempt+1, maxRetries, backoff) // #nosec G706 -- user input is escaped with %q
 			time.Sleep(backoff)
 		}
 
 		app, err := operation()
 		if err == nil {
 			if attempt > 0 {
-				log.Printf("%s: succeeded on attempt %d/%d", operationName, attempt+1, maxRetries)
+				log.Printf("%q: succeeded on attempt %d/%d", operationName, attempt+1, maxRetries) // #nosec G706 -- user input is escaped with %q
 			}
 			return app, nil
 		}
@@ -267,7 +260,18 @@ func retryOperation(operation func() (App, error), maxRetries int, operationName
 }
 
 func HuaweiAppGallery(appID string) (App, error) {
-	app, err := retryOperation(func() (App, error) {
+	// The web API is plain HTTP (no browser), so it is fast and works from hosts
+	// where headless Chrome gets an empty page
+	app, err := huaweiAppGalleryWebAPI("app|C" + appID)
+	if err == nil {
+		return app, nil
+	}
+	if errors.Is(err, ErrAppNotFound) {
+		return App{}, err
+	}
+	log.Printf("Huawei AppGallery web API failed for appID %q, falling back to scraping: %v", appID, err) // #nosec G706 -- user input is escaped with %q
+
+	app, err = retryOperation(func() (App, error) {
 		return huaweiAppGalleryScrape(appID)
 	}, 3, fmt.Sprintf("HuaweiAppGallery scrape for appID %s", appID))
 
@@ -276,7 +280,7 @@ func HuaweiAppGallery(appID string) (App, error) {
 	}
 
 	if shouldUseHuaweiAPIFallback() {
-		log.Printf("Falling back to Huawei AppGallery API for appID %s due to scrape error: %v", appID, err)
+		log.Printf("Falling back to Huawei AppGallery API for appID %q due to scrape error: %v", appID, err) // #nosec G706 -- user input is escaped with %q
 		if fallback, apiErr := HuaweiAppGalleryByToken(appID); apiErr == nil {
 			return fallback, nil
 		} else {
@@ -291,13 +295,140 @@ func shouldUseHuaweiAPIFallback() bool {
 	return os.Getenv("HUAWEI_CLIENT_ID") != "" && os.Getenv("HUAWEI_CLIENT_SECRET") != ""
 }
 
+const huaweiWebAPIBase = "https://web-dra.hispace.dbankcloud.com/edge"
+
+// HuaweiAppGalleryByBundleID looks up an app by its package name (e.g. com.example.app)
+func HuaweiAppGalleryByBundleID(bundleID string) (App, error) {
+	return huaweiAppGalleryWebAPI("package|" + bundleID)
+}
+
+// huaweiAppGalleryWebAPI fetches app data from the JSON API behind the AppGallery website.
+// uri selects the app: "app|C<appID>" or "package|<bundleID>".
+func huaweiAppGalleryWebAPI(uri string) (App, error) {
+	log.Printf("Fetching Huawei AppGallery app data via web API for uri: %q", uri) // #nosec G706 -- user input is escaped with %q
+
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
+	defer cancel()
+
+	// The detail endpoint requires a short-lived interface code issued by the site
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, huaweiWebAPIBase+"/webedge/getInterfaceCode",
+		strings.NewReader(`{"params":{},"zone":"","locale":"en_US"}`))
+	if err != nil {
+		return App{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	var interfaceCode string
+	if err := doHuaweiWebRequest(req, &interfaceCode); err != nil {
+		return App{}, fmt.Errorf("failed to get interface code: %w", err)
+	}
+	if interfaceCode == "" {
+		return App{}, errors.New("empty interface code")
+	}
+
+	params := url.Values{
+		"method":      {"internal.getTabDetail"},
+		"serviceType": {"20"},
+		"reqPageNum":  {"1"},
+		"maxResults":  {"25"},
+		"uri":         {uri},
+		"zone":        {""},
+		"locale":      {"en_US"},
+	}
+	detailURL := huaweiWebAPIBase + "/uowap/index?" + params.Encode()
+	req, err = http.NewRequestWithContext(ctx, http.MethodGet, detailURL, http.NoBody)
+	if err != nil {
+		return App{}, err
+	}
+	req.Header.Set("Interface-Code", fmt.Sprintf("%s_%d", interfaceCode, time.Now().UnixMilli()))
+
+	var detail struct {
+		RtnCode    int    `json:"rtnCode"`
+		RtnDesc    string `json:"rtnDesc"`
+		LayoutData []struct {
+			DataList []struct {
+				Name        string `json:"name"`
+				Package     string `json:"package"`
+				AppID       string `json:"appid"`
+				VersionName string `json:"versionName"`
+				Developer   string `json:"developer"`
+				ReleaseDate string `json:"releaseDate"`
+			} `json:"dataList"`
+		} `json:"layoutData"`
+	}
+	if err := doHuaweiWebRequest(req, &detail); err != nil {
+		return App{}, fmt.Errorf("failed to get app detail: %w", err)
+	}
+	if detail.RtnCode != 0 {
+		return App{}, fmt.Errorf("huawei web api returned code %d: %s", detail.RtnCode, detail.RtnDesc)
+	}
+
+	var app App
+	var updated string
+
+	// App fields are spread across several detail cards; the card carrying
+	// versionName holds the title, and the app info card holds developer and date
+	for _, layout := range detail.LayoutData {
+		for _, item := range layout.DataList {
+			if item.VersionName != "" && app.version == "" {
+				app.title = item.Name
+				app.version = item.VersionName
+				app.bundleID = item.Package
+				app.appID = strings.TrimPrefix(item.AppID, "C")
+			}
+			if item.Developer != "" && app.developer == "" {
+				app.developer = item.Developer
+				updated = item.ReleaseDate
+			}
+		}
+	}
+
+	// Delisted or unknown apps return an empty detail page
+	if app.version == "" && app.developer == "" {
+		return App{}, ErrAppNotFound
+	}
+
+	if err := validateAppData(&app, "Huawei AppGallery web API"); err != nil {
+		return App{}, err
+	}
+	if app.appID == "" {
+		return App{}, errors.New("huawei AppGallery web API: missing app ID")
+	}
+	app.url = "https://appgallery.huawei.com/app/C" + url.PathEscape(app.appID)
+
+	parsedDate, err := parseFlexibleDate(updated)
+	if err != nil {
+		return App{}, fmt.Errorf("failed to parse update date: %w", err)
+	}
+	app.updated = parsedDate.Format("02-01-2006")
+
+	return app, nil
+}
+
+func doHuaweiWebRequest(req *http.Request, out any) error {
+	req.Header.Set("Origin", "https://appgallery.huawei.com")
+	req.Header.Set("Referer", "https://appgallery.huawei.com/")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("status code is not OK: %d", resp.StatusCode)
+	}
+
+	return json.NewDecoder(resp.Body).Decode(out)
+}
+
 func huaweiAppGalleryScrape(appID string) (App, error) {
 	app := App{
 		appID: appID,
-		url:   fmt.Sprintf("https://appgallery.huawei.com/app/C%s", appID),
+		url:   "https://appgallery.huawei.com/app/C" + url.PathEscape(appID),
 	}
 
-	log.Printf("Fetching Huawei AppGallery app data for appID: %s", appID)
+	log.Printf("Fetching Huawei AppGallery app data for appID: %q", appID) // #nosec G706 -- user input is escaped with %q
 
 	// Create context with chromedp-undetected for anti-bot protection
 	taskCtx, cancel, err := createBrowserContext()
@@ -372,13 +503,13 @@ func huaweiAppGalleryScrape(appID string) (App, error) {
 	app.bundleID = extractedData.BundleID
 	updated = extractedData.Updated
 
-	if err := validateAppData(app, "Huawei AppGallery scrape"); err != nil {
+	if err := validateAppData(&app, "Huawei AppGallery scrape"); err != nil {
 		return App{}, err
 	}
 
 	parsedDate, err := parseFlexibleDate(updated)
 	if err != nil {
-		log.Printf("Error parsing date '%s': %v", updated, err)
+		log.Printf("Error parsing date %q: %v", updated, err)
 		return App{}, fmt.Errorf("failed to parse update date: %w", err)
 	}
 
@@ -395,12 +526,13 @@ func AppleAppStore(appID, bundleID, country string) (App, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
 	defer cancel()
 
-	itunesURL := fmt.Sprintf("https://itunes.apple.com/lookup?id=%s&country=%s", appID, country)
+	params := url.Values{"id": {appID}, "country": {country}}
 	if bundleID != "" {
-		itunesURL = fmt.Sprintf("https://itunes.apple.com/lookup?bundleId=%s&country=%s", bundleID, country)
+		params = url.Values{"bundleId": {bundleID}, "country": {country}}
 	}
+	itunesURL := "https://itunes.apple.com/lookup?" + params.Encode()
 
-	log.Printf("Fetching AppleAppStore app data for appID: %s", appID)
+	log.Printf("Fetching AppleAppStore app data for appID: %q, bundleID: %q", appID, bundleID) // #nosec G706 -- user input is escaped with %q
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, itunesURL, http.NoBody)
 	if err != nil {
 		return App{}, err
@@ -472,7 +604,7 @@ func HuaweiAppGalleryByToken(appID string) (App, error) {
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		fmt.Sprintf("https://connect-api.cloud.huawei.com/api/publish/v2/app-info?appId=%s", appID), http.NoBody)
+		"https://connect-api.cloud.huawei.com/api/publish/v2/app-info?"+url.Values{"appId": {appID}}.Encode(), http.NoBody)
 	if err != nil {
 		log.Printf("Failed to create request: %v", err)
 		return App{}, err
@@ -492,7 +624,7 @@ func HuaweiAppGalleryByToken(appID string) (App, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("Status code is not OK: %d", resp.StatusCode)
-		return App{}, err
+		return App{}, fmt.Errorf("status code is not OK: %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -547,7 +679,7 @@ func HuaweiAppGalleryByToken(appID string) (App, error) {
 	return App{
 		appID:     appID,
 		bundleID:  bundleID,
-		url:       fmt.Sprintf("https://appgallery.huawei.com/app/C%s", appID),
+		url:       "https://appgallery.huawei.com/app/C" + url.PathEscape(appID),
 		title:     title,
 		version:   appResponse.AppInfo.VersionNumber,
 		updated:   parseDate.Format("02-01-2006"),
@@ -574,7 +706,7 @@ func getHuaweiToken() (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		"https://connect-api-dre.cloud.huawei.com/api/oauth2/v1/token", bytes.NewBuffer(jsonData))
 	if err != nil {
-		log.Printf("Faield to create request: %v", err)
+		log.Printf("Failed to create request: %v", err)
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")

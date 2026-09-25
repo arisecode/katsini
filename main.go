@@ -12,6 +12,20 @@ import (
 	"time"
 )
 
+// JSON keys and messages shared by the handlers
+const (
+	keyAppID     = "appId"
+	keyBundleID  = "bundleId"
+	keyURL       = "url"
+	keyTitle     = "title"
+	keyVersion   = "version"
+	keyUpdated   = "updated"
+	keyDeveloper = "developer"
+	keyError     = "error"
+
+	msgMethodNotAllowed = "Method not allowed"
+)
+
 // ResponseWriter helper to standardize JSON responses
 func writeJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -23,13 +37,29 @@ func writeJSON(w http.ResponseWriter, status int, data any) {
 
 // ErrorResponse helper for consistent error responses
 func writeError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, map[string]string{"error": message})
+	writeJSON(w, status, map[string]string{keyError: message})
+}
+
+// appResponse builds the JSON body for an app; appId is omitted when the store has none
+func appResponse(app *App) map[string]string {
+	resp := map[string]string{
+		keyBundleID:  app.bundleID,
+		keyURL:       app.url,
+		keyTitle:     app.title,
+		keyVersion:   app.version,
+		keyUpdated:   app.updated,
+		keyDeveloper: app.developer,
+	}
+	if app.appID != "" {
+		resp[keyAppID] = app.appID
+	}
+	return resp
 }
 
 // Middleware for logging
 func loggerMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("%s %s", r.Method, r.URL.Path)
+		log.Printf("%s %q", r.Method, r.URL.Path) // #nosec G706 -- user input is escaped with %q
 		next.ServeHTTP(w, r)
 	})
 }
@@ -49,7 +79,7 @@ func recoveryMiddleware(next http.Handler) http.Handler {
 
 func handleGooglePlayStore(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		writeError(w, http.StatusMethodNotAllowed, msgMethodNotAllowed)
 		return
 	}
 
@@ -69,19 +99,12 @@ func handleGooglePlayStore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{
-		"bundleId":  app.bundleID,
-		"url":       app.url,
-		"title":     app.title,
-		"version":   app.version,
-		"updated":   app.updated,
-		"developer": app.developer,
-	})
+	writeJSON(w, http.StatusOK, appResponse(&app))
 }
 
 func handleAppleAppStore(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		writeError(w, http.StatusMethodNotAllowed, msgMethodNotAllowed)
 		return
 	}
 
@@ -101,44 +124,37 @@ func handleAppleAppStore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{
-		"appId":     app.appID,
-		"bundleId":  app.bundleID,
-		"url":       app.url,
-		"title":     app.title,
-		"version":   app.version,
-		"updated":   app.updated,
-		"developer": app.developer,
-	})
+	writeJSON(w, http.StatusOK, appResponse(&app))
 }
 
 func handleHuaweiAppGallery(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		writeError(w, http.StatusMethodNotAllowed, msgMethodNotAllowed)
 		return
 	}
 
-	appID := r.URL.Query().Get("appId")
-	if appID == "" {
-		writeError(w, http.StatusBadRequest, "Please provide an app appId")
+	query := r.URL.Query()
+	appID := query.Get("appId")
+	bundleID := query.Get("bundleId")
+
+	if appID == "" && bundleID == "" {
+		writeError(w, http.StatusBadRequest, "Please provide an app appId or bundleId")
 		return
 	}
 
-	app, err := HuaweiAppGallery(appID)
+	var app App
+	var err error
+	if appID != "" {
+		app, err = HuaweiAppGallery(appID)
+	} else {
+		app, err = HuaweiAppGalleryByBundleID(bundleID)
+	}
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{
-		"appId":     app.appID,
-		"bundleId":  app.bundleID,
-		"url":       app.url,
-		"title":     app.title,
-		"version":   app.version,
-		"updated":   app.updated,
-		"developer": app.developer,
-	})
+	writeJSON(w, http.StatusOK, appResponse(&app))
 }
 
 func main() {
