@@ -1,4 +1,4 @@
-FROM golang:1.26-alpine AS build
+FROM golang:1.27-alpine AS build
 
 # Install build dependencies and UPX
 RUN apk add --no-cache curl upx
