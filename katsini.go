@@ -14,13 +14,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/chromedp/cdproto/cdp"
-	"github.com/chromedp/cdproto/fetch"
-	"github.com/chromedp/cdproto/network"
-
-	undetected "github.com/Davincible/chromedp-undetected"
-	"github.com/chromedp/chromedp"
 )
 
 type App struct {
@@ -38,79 +31,7 @@ var (
 	ErrPageLoad    = errors.New("failed to load page")
 )
 
-const (
-	DefaultTimeout     = 30 * time.Second
-	chromeStartTimeout = 60 * time.Second
-)
-
-// Common resource types to block for faster page loading
-var commonResourceTypesToBlock = []network.ResourceType{
-	network.ResourceTypeImage,
-	network.ResourceTypeFont,
-	network.ResourceTypeMedia,
-	network.ResourceTypeManifest,
-	network.ResourceTypeOther,
-}
-
-// createBrowserContext creates a browser context with anti-bot protection.
-// chromedp-undetected always launches a local Chrome (it only supports headless on Linux);
-// when that fails and CHROME_HOST/CHROME_PORT are set, it falls back to that remote Chrome.
-func createBrowserContext() (context.Context, context.CancelFunc, error) {
-	taskCtx, cancel, err := undetected.New(undetected.Config{
-		Headless:  true,
-		NoSandbox: true,
-		// a cold Chrome start (e.g. on a fresh CI runner) can exceed chromedp's 20s default
-		ChromeFlags: []chromedp.ExecAllocatorOption{chromedp.WSURLReadTimeout(chromeStartTimeout)},
-	})
-	if err == nil {
-		return taskCtx, cancel, nil
-	}
-
-	chromeHost := os.Getenv("CHROME_HOST")
-	chromePort := os.Getenv("CHROME_PORT")
-	if chromeHost == "" || chromePort == "" {
-		return nil, nil, fmt.Errorf("failed to create undetected context: %w", err)
-	}
-
-	log.Printf("Undetected mode not available (%v), using remote Chrome at %q:%q", err, chromeHost, chromePort) // #nosec G706 -- user input is escaped with %q
-	allocCtx, allocCancel := chromedp.NewRemoteAllocator(context.Background(), fmt.Sprintf("ws://%s:%s/json", chromeHost, chromePort))
-	taskCtx, cancel = chromedp.NewContext(allocCtx)
-	return taskCtx, func() {
-		cancel()
-		allocCancel()
-	}, nil
-}
-
-func DisableFetchExceptScripts(ctx context.Context, resourceTypesToBlock []network.ResourceType) func(event any) {
-	return func(event any) {
-		if ev, ok := event.(*fetch.EventRequestPaused); ok {
-			go func() {
-				c := chromedp.FromContext(ctx)
-				cdpCtx := cdp.WithExecutor(ctx, c.Target)
-
-				shouldBlock := false
-				for _, resourceType := range resourceTypesToBlock {
-					if ev.ResourceType == resourceType {
-						shouldBlock = true
-						break
-					}
-				}
-
-				if shouldBlock {
-					if err := fetch.FailRequest(ev.RequestID, network.ErrorReasonBlockedByClient).Do(cdpCtx); err != nil {
-						log.Printf("Failed to block request: %s \n", err)
-						return
-					}
-				} else {
-					if err := fetch.ContinueRequest(ev.RequestID).Do(cdpCtx); err != nil {
-						log.Printf("Failed to continue request: %s \n", err)
-						return
-					}
-				}
-			}()
-		}
-	}
-}
+const DefaultTimeout = 30 * time.Second
 
 func GooglePlayStore(bundleID, lang, country string) (App, error) {
 	app := App{
@@ -126,81 +47,124 @@ func GooglePlayStore(bundleID, lang, country string) (App, error) {
 	}
 
 	log.Printf("Fetching Google Play Store app data for bundleID: %q, lang: %q, country: %q", bundleID, lang, country) // #nosec G706 -- user input is escaped with %q
-	app.url = fmt.Sprintf("https://play.google.com/store/apps/details?id=%s&hl=%s&gl=%s",
-		url.QueryEscape(bundleID), url.QueryEscape(lang), url.QueryEscape(country))
+	// built by hand rather than with url.Values.Encode, which sorts keys and would change the returned url
+	app.url = playStoreBaseURL + "/store/apps/details?id=" + url.QueryEscape(bundleID) +
+		"&hl=" + url.QueryEscape(lang) + "&gl=" + url.QueryEscape(country)
 
-	// Create context with chromedp-undetected for anti-bot protection
-	taskCtx, cancel, err := createBrowserContext()
-	if err != nil {
-		return App{}, fmt.Errorf("failed to create browser context: %w", err)
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
 	defer cancel()
 
-	chromedp.ListenTarget(taskCtx, DisableFetchExceptScripts(taskCtx, append(commonResourceTypesToBlock, network.ResourceTypeStylesheet)))
-
-	// set a timeout to avoid long waits
-	timeoutCtx, cancel := context.WithTimeout(taskCtx, DefaultTimeout)
-	defer cancel()
-
-	aboutButton := `button[aria-label="See more information on About this app"], button[aria-label="See more information on About this game"]`
-	xpath := `//div[contains(text(), "About this app") or contains(text(), "About this game")]`
-	xpathTitle := `//div[contains(text(), "About this app") or contains(text(), "About this game")]/preceding-sibling::h5[1]`
-	xpathVersion := ` //div[contains(text(), "Version")]/following-sibling::div[1]`
-	xpathUpdated := `//div[contains(text(), "Updated")]/following-sibling::div[1]`
-	xpathDeveloper := `//div[contains(text(), "Offered by")]/following-sibling::div[1]`
-
-	var notFound bool
-	var updated string
-
-	// run the task to navigate and extract the version text
-	if err := chromedp.Run(timeoutCtx,
-		fetch.Enable(),
-		chromedp.Navigate(app.url),
-		// Check if app exists using JavaScript
-		chromedp.Evaluate(`document.body.innerText.includes("We're sorry, the requested URL was not found on this server.")`, &notFound),
-		chromedp.ActionFunc(func(_ context.Context) error {
-			if notFound {
-				return ErrAppNotFound
-			}
-			return nil
-		}),
-		// wait for the element is visible
-		chromedp.WaitVisible(aboutButton),
-		// click the button via JS: a mouse click at its coordinates can land on the
-		// overlapping header (e.g. the "Games" tab) and navigate away
-		chromedp.Evaluate(fmt.Sprintf(`document.querySelector(%q).click()`, aboutButton), nil),
-		// wait for the element is visible
-		chromedp.WaitVisible(xpath),
-		// get app title
-		chromedp.Text(xpathTitle, &app.title),
-		// get app version
-		chromedp.Text(xpathVersion, &app.version),
-		// get app updated
-		chromedp.Text(xpathUpdated, &updated),
-		// get app developer
-		chromedp.Text(xpathDeveloper, &app.developer),
-	); err != nil {
-		switch {
-		case strings.Contains(err.Error(), "context deadline exceeded"):
-			return App{}, fmt.Errorf("%w: timeout while extracting data", ErrPageLoad)
-		case errors.Is(err, ErrAppNotFound):
-			return App{}, ErrAppNotFound
-		default:
-			return App{}, fmt.Errorf("failed to extract app data: %w", err)
-		}
-	}
-
-	parsedDate, err := time.Parse("Jan 2, 2006", updated)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, app.url, http.NoBody) // #nosec G704 -- fixed Play host; user input is only in escaped query values
 	if err != nil {
-		log.Printf("Error parsing date: %s \n", err)
 		return App{}, err
 	}
-	app.updated = parsedDate.Format("02-01-2006")
+	req.Header.Set("User-Agent", playStoreUserAgent)
+	req.Header.Set("Accept-Language", lang)
+
+	resp, err := http.DefaultClient.Do(req) // #nosec G704 -- see request above
+	if err != nil {
+		return App{}, fmt.Errorf("%w: %w", ErrPageLoad, err)
+	}
+	defer resp.Body.Close()
+
+	switch {
+	case resp.StatusCode == http.StatusNotFound:
+		return App{}, ErrAppNotFound
+	case resp.StatusCode != http.StatusOK:
+		return App{}, fmt.Errorf("%w: unexpected status %d", ErrPageLoad, resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxPlayStorePageSize))
+	if err != nil {
+		return App{}, fmt.Errorf("%w: %w", ErrPageLoad, err)
+	}
+
+	if err := parsePlayStorePage(body, &app); err != nil {
+		return App{}, err
+	}
 
 	return app, nil
 }
 
-// parseFlexibleDate attempts to parse a date string using multiple common formats
+// Positions of the app fields inside the details array (data[1][2]) of the embedded JSON
+const (
+	playStoreTitleIdx     = 0
+	playStoreDeveloperIdx = 68
+	playStoreVersionIdx   = 140
+	playStoreUpdatedIdx   = 145
+)
+
+// playStoreBaseURL is a variable so tests can point it at a local server
+var playStoreBaseURL = "https://play.google.com"
+
+const (
+	playStoreUserAgent   = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+	maxPlayStorePageSize = 10 << 20
+)
+
+var afInitDataCallbackMarker = []byte("AF_initDataCallback(")
+
+// parsePlayStorePage reads the app details from the JSON blobs that Play embeds in the
+// page as AF_initDataCallback({key: 'ds:N', ..., data: [...]}). The details live in the
+// blob whose data[1][2] is the app entry; its key (currently ds:5) has shifted before, so
+// every blob is tried instead of relying on the key.
+func parsePlayStorePage(page []byte, app *App) error {
+	for rest := page; ; {
+		i := bytes.Index(rest, afInitDataCallbackMarker)
+		if i < 0 {
+			return fmt.Errorf("failed to extract app data: app details not found in page")
+		}
+		rest = rest[i+len(afInitDataCallbackMarker):]
+
+		j := bytes.Index(rest, []byte("data:"))
+		if j < 0 {
+			continue
+		}
+
+		var data any
+		// Decode reads only the first JSON value, leaving the trailing JS (sideChannel etc.) alone
+		if err := json.NewDecoder(bytes.NewReader(rest[j+len("data:"):])).Decode(&data); err != nil {
+			continue
+		}
+
+		details := jsonAt(data, 1, 2)
+		title, _ := jsonAt(details, playStoreTitleIdx, 0).(string)
+		developer, _ := jsonAt(details, playStoreDeveloperIdx, 0).(string)
+		version, _ := jsonAt(details, playStoreVersionIdx, 0, 0, 0).(string)
+		updatedUnix, _ := jsonAt(details, playStoreUpdatedIdx, 0, 1, 0).(float64)
+		if title == "" || developer == "" {
+			continue
+		}
+		if updatedUnix == 0 {
+			// Play serves a stripped page (no version or date) when the app isn't offered in the requested country
+			return fmt.Errorf("%w: not available in this country", ErrAppNotFound)
+		}
+
+		if version == "" {
+			// Play omits the version for apps that ship different builds per device
+			version = "Varies with device"
+		}
+
+		app.title = title
+		app.developer = developer
+		app.version = version
+		app.updated = time.Unix(int64(updatedUnix), 0).UTC().Format("02-01-2006")
+		return nil
+	}
+}
+
+// jsonAt walks nested JSON arrays by index, returning nil when any step is missing.
+func jsonAt(v any, path ...int) any {
+	for _, i := range path {
+		arr, ok := v.([]any)
+		if !ok || i < 0 || i >= len(arr) {
+			return nil
+		}
+		v = arr[i]
+	}
+	return v
+}
+
 func parseFlexibleDate(dateStr string) (time.Time, error) {
 	formats := []string{
 		"1/2/2006",            // Huawei format (M/D/YYYY)
@@ -260,27 +224,16 @@ func retryOperation(operation func() (App, error), maxRetries int, operationName
 }
 
 func HuaweiAppGallery(appID string) (App, error) {
-	// The web API is plain HTTP (no browser), so it is fast and works from hosts
-	// where headless Chrome gets an empty page
-	app, err := huaweiAppGalleryWebAPI("app|C" + appID)
-	if err == nil {
-		return app, nil
-	}
-	if errors.Is(err, ErrAppNotFound) {
-		return App{}, err
-	}
-	log.Printf("Huawei AppGallery web API failed for appID %q, falling back to scraping: %v", appID, err) // #nosec G706 -- user input is escaped with %q
+	app, err := retryOperation(func() (App, error) {
+		return huaweiAppGalleryWebAPI("app|C" + appID)
+	}, 3, fmt.Sprintf("HuaweiAppGallery web API for appID %s", appID))
 
-	app, err = retryOperation(func() (App, error) {
-		return huaweiAppGalleryScrape(appID)
-	}, 3, fmt.Sprintf("HuaweiAppGallery scrape for appID %s", appID))
-
-	if err == nil {
-		return app, nil
+	if err == nil || errors.Is(err, ErrAppNotFound) {
+		return app, err
 	}
 
 	if shouldUseHuaweiAPIFallback() {
-		log.Printf("Falling back to Huawei AppGallery API for appID %q due to scrape error: %v", appID, err) // #nosec G706 -- user input is escaped with %q
+		log.Printf("Falling back to Huawei AppGallery API for appID %q due to web API error: %v", appID, err) // #nosec G706 -- user input is escaped with %q
 		if fallback, apiErr := HuaweiAppGalleryByToken(appID); apiErr == nil {
 			return fallback, nil
 		} else {
@@ -420,102 +373,6 @@ func doHuaweiWebRequest(req *http.Request, out any) error {
 	}
 
 	return json.NewDecoder(resp.Body).Decode(out)
-}
-
-func huaweiAppGalleryScrape(appID string) (App, error) {
-	app := App{
-		appID: appID,
-		url:   "https://appgallery.huawei.com/app/C" + url.PathEscape(appID),
-	}
-
-	log.Printf("Fetching Huawei AppGallery app data for appID: %q", appID) // #nosec G706 -- user input is escaped with %q
-
-	// Create context with chromedp-undetected for anti-bot protection
-	taskCtx, cancel, err := createBrowserContext()
-	if err != nil {
-		return App{}, fmt.Errorf("failed to create browser context: %w", err)
-	}
-	defer cancel()
-
-	// Use shared resource blocking configuration
-	chromedp.ListenTarget(taskCtx, DisableFetchExceptScripts(taskCtx, commonResourceTypesToBlock))
-
-	timeoutCtx, cancel := context.WithTimeout(taskCtx, DefaultTimeout)
-	defer cancel()
-
-	var notFound bool
-	var updated string
-
-	// Structure to hold all extracted data from JavaScript
-	var extractedData struct {
-		Title     string `json:"title"`
-		Version   string `json:"version"`
-		Updated   string `json:"updated"`
-		Developer string `json:"developer"`
-		BundleID  string `json:"bundleID"`
-	}
-
-	if err := chromedp.Run(timeoutCtx,
-		fetch.Enable(),
-		chromedp.Navigate(app.url),
-		chromedp.WaitVisible(`div[class="horizonhomecard"]`),
-		chromedp.WaitVisible(`div[class="componentContainer"]`),
-		// Check if app exists by examining component container height
-		// A height < 500px typically indicates an error or missing app page
-		chromedp.Evaluate(`document.querySelector('.componentContainer').offsetHeight < 500`, &notFound),
-		chromedp.ActionFunc(func(_ context.Context) error {
-			if notFound {
-				return ErrAppNotFound
-			}
-			return nil
-		}),
-
-		chromedp.Evaluate(`
-			(function() {
-				const getTextByXPath = (xpath) => {
-					const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
-					return result.singleNodeValue?.innerText?.trim() || '';
-				};
-
-				return {
-					title: document.querySelector('div.center_info > div.title')?.innerText?.trim() || '',
-					version: getTextByXPath('//div[contains(text(), "Version")]/following-sibling::div[1]'),
-					updated: getTextByXPath('//div[contains(text(), "Updated")]/following-sibling::div[1]'),
-					developer: getTextByXPath('//div[contains(text(), "Developer")]/following-sibling::div[1]'),
-					bundleID: document.querySelector('div[package]')?.getAttribute('package') || ''
-				};
-			})()
-		`, &extractedData),
-	); err != nil {
-		switch {
-		case strings.Contains(err.Error(), "context deadline exceeded"):
-			return App{}, fmt.Errorf("%w: timeout while extracting data from %s", ErrPageLoad, app.url)
-		case errors.Is(err, ErrAppNotFound):
-			return App{}, ErrAppNotFound
-		default:
-			return App{}, fmt.Errorf("failed to extract app data from %s: %w", app.url, err)
-		}
-	}
-
-	app.title = extractedData.Title
-	app.version = extractedData.Version
-	app.developer = extractedData.Developer
-	app.bundleID = extractedData.BundleID
-	updated = extractedData.Updated
-
-	if err := validateAppData(&app, "Huawei AppGallery scrape"); err != nil {
-		return App{}, err
-	}
-
-	parsedDate, err := parseFlexibleDate(updated)
-	if err != nil {
-		log.Printf("Error parsing date %q: %v", updated, err)
-		return App{}, fmt.Errorf("failed to parse update date: %w", err)
-	}
-
-	app.updated = parsedDate.Format("02-01-2006")
-
-	return app, nil
 }
 
 func AppleAppStore(appID, bundleID, country string) (App, error) {
